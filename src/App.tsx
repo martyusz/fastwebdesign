@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { CanvasArea } from './ui/CanvasArea';
+import { DocumentDialog } from './ui/DocumentDialog';
 import { FilterDialog } from './ui/FilterDialog';
 import { LeftToolbar } from './ui/LeftToolbar';
 import { RightPanel } from './ui/RightPanel';
@@ -44,9 +45,15 @@ function App() {
 
       if (key === 'escape') {
         const state = useEditorStore.getState();
-        if (state.filterDialog) state.cancelFilterDialog();
+        if (state.documentDialog) state.cancelDocumentDialog();
+        else if (state.filterDialog) state.cancelFilterDialog();
         else if (state.cropRect) state.cancelCrop();
         else if (state.selection) state.clearSelection();
+        return;
+      }
+
+      if (key === 'enter' && useEditorStore.getState().documentDialog) {
+        useEditorStore.getState().applyDocumentDialog();
         return;
       }
 
@@ -83,6 +90,7 @@ function App() {
       </div>
       <StatusBar />
       <FilterDialog />
+      <DocumentDialog />
     </div>
   );
 }

@@ -33,6 +33,12 @@ export function TopMenuBar() {
   const openFilter = useEditorStore((s) => s.openFilter);
   const activeLayer = useEditorStore((s) => s.layers.find((l) => l.id === s.activeLayerId));
   const layerEditable = Boolean(activeLayer && !activeLayer.locked && activeLayer.visible);
+  const openNewDocumentDialog = useEditorStore((s) => s.openNewDocumentDialog);
+  const openCanvasSizeDialog = useEditorStore((s) => s.openCanvasSizeDialog);
+  const openImageSizeDialog = useEditorStore((s) => s.openImageSizeDialog);
+  const openExportDialog = useEditorStore((s) => s.openExportDialog);
+  const importImageFile = useEditorStore((s) => s.importImageFile);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -48,9 +54,9 @@ export function TopMenuBar() {
     {
       label: 'File',
       items: [
-        { label: 'New…', shortcut: 'Ctrl+N', disabled: true },
-        { label: 'Open…', shortcut: 'Ctrl+O', disabled: true },
-        { label: 'Export As…', shortcut: 'Ctrl+E', disabled: true },
+        { label: 'New…', onClick: openNewDocumentDialog },
+        { label: 'Open…', onClick: () => fileInputRef.current?.click() },
+        { label: 'Export As…', onClick: openExportDialog },
       ],
     },
     {
@@ -64,8 +70,8 @@ export function TopMenuBar() {
     {
       label: 'Image',
       items: [
-        { label: 'Canvas Size…', disabled: true },
-        { label: 'Image Size…', disabled: true },
+        { label: 'Canvas Size…', onClick: openCanvasSizeDialog },
+        { label: 'Image Size…', onClick: openImageSizeDialog },
       ],
     },
     {
@@ -91,6 +97,17 @@ export function TopMenuBar() {
 
   return (
     <header className="h-10 shrink-0 flex items-center justify-between px-3 bg-[#18181b] border-b border-black/40 text-sm">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) importImageFile(file);
+          e.target.value = '';
+        }}
+      />
       <div className="flex items-center gap-4">
         <Logo />
         <nav ref={containerRef} className="flex items-center gap-0.5">

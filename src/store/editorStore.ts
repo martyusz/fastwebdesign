@@ -1,13 +1,17 @@
 import { create } from 'zustand';
 import {
   cloneCanvasImageData,
+  compositeAllLayers,
   createLayer,
   createMaskCanvas,
   duplicateLayer as cloneLayer,
   flipCanvasHorizontal,
   flipCanvasVertical,
+  resizeCanvas,
+  resizeMaskCanvas,
   restoreCanvasImageData,
   rotateCanvas90,
+  scaleCanvas,
 } from '../engine/layer';
 import { clipToSelection } from '../engine/selection';
 import { getFilter } from '../filters';
@@ -23,6 +27,15 @@ import type {
   ToolPreview,
 } from '../engine/types';
 import { useHistoryStore } from './historyStore';
+
+/** 0 = left/top, 1 = center/middle, 2 = right/bottom. */
+export type AnchorIndex = 0 | 1 | 2;
+
+export type DocumentDialogState =
+  | { mode: 'new'; width: number; height: number; background: 'white' | 'transparent' }
+  | { mode: 'image-size'; width: number; height: number; originalWidth: number; originalHeight: number; maintainAspect: boolean }
+  | { mode: 'canvas-size'; width: number; height: number; originalWidth: number; originalHeight: number; anchorX: AnchorIndex; anchorY: AnchorIndex }
+  | { mode: 'export'; format: 'png' | 'jpeg'; quality: number; filename: string };
 
 interface EditorState {
   width: number;
@@ -114,6 +127,19 @@ interface EditorState {
   updateFilterParams: (params: Record<string, number>) => void;
   applyFilterDialog: () => void;
   cancelFilterDialog: () => void;
+
+  /** Modal dialog for New Document / Image Size / Canvas Size / Export As. */
+  documentDialog: DocumentDialogState | null;
+  openNewDocumentDialog: () => void;
+  openImageSizeDialog: () => void;
+  openCanvasSizeDialog: () => void;
+  openExportDialog: () => void;
+  updateDocumentDialog: (patch: Record<string, unknown>) => void;
+  applyDocumentDialog: () => void;
+  cancelDocumentDialog: () => void;
+
+  /** Imports an image file as a new layer placed at the top-left of the canvas. */
+  importImageFile: (file: File) => void;
 }
 
 const INITIAL_WIDTH = 1024;
@@ -597,5 +623,218 @@ export const useEditorStore = create<EditorState>((set, get) => {
       filterBackup = null;
       set({ filterDialog: null });
     },
+
+    documentDialog: null,
+
+    openNewDocumentDialog: () => {
+      const state = get();
+      if (state.documentDialog) return;
+      set({ documentDialog: { mode: 'new', width: state.width, height: state.height, background: 'white' } });
+    },
+
+    openImageSizeDialog: () => {
+      const state = get();
+      if (state.documentDialog) return;
+      set({
+        documentDialog: {
+          mode: 'image-size',
+          width: state.width,
+          height: state.height,
+          originalWidth: state.width,
+          originalHeight: state.height,
+          maintainAspect: true,
+        },
+      });
+    },
+
+    openCanvasSizeDialog: () => {
+      const state = get();
+      if (state.documentDialog) return;
+      set({
+        documentDialog: {
+          mode: 'canvas-size',
+          width: state.width,
+          height: state.height,
+          originalWidth: state.width,
+          originalHeight: state.height,
+          anchorX: 1,
+          anchorY: 1,
+        },
+      });
+    },
+
+    openExportDialog: () => {
+      const state = get();
+      if (state.documentDialog) return;
+      set({ documentDialog: { mode: 'export', format: 'png', quality: 0.92, filename: 'pixelforge-export' } });
+    },
+
+    updateDocumentDialog: (patch) => {
+      const dialog = get().documentDialog;
+      if (!dialog) return;
+      set({ documentDialog: { ...dialog, ...patch } as DocumentDialogState });
+    },
+
+    cancelDocumentDialog: () => set({ documentDialog: null }),
+
+    applyDocumentDialog: () => {
+      const dialog = get().documentDialog;
+      if (!dialog) return;
+
+      if (dialog.mode === 'new') {
+        const width = Math.max(1, Math.round(dialog.width));
+        const height = Math.max(1, Math.round(dialog.height));
+        const layer = createLayer(width, height, 'Background');
+        if (dialog.background === 'white') {
+          const ctx = layer.canvas.getContext('2d')!;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+        }
+        useHistoryStore.getState().reset();
+        set({
+          width,
+          height,
+          layers: [layer],
+          activeLayerId: layer.id,
+          activeEditTarget: 'pixels',
+          selection: null,
+          toolPreview: null,
+          cropRect: null,
+          filterDialog: null,
+          zoom: 1,
+          documentDialog: null,
+        });
+        get().requestRedraw();
+        return;
+      }
+
+      if (dialog.mode === 'image-size') {
+        const width = Math.max(1, Math.round(dialog.width));
+        const height = Math.max(1, Math.round(dialog.height));
+        const state = get();
+        const before = { layers: state.layers, width: state.width, height: state.height };
+        const layers = state.layers.map((layer) => ({
+          ...layer,
+          canvas: scaleCanvas(layer.canvas, width, height),
+          mask: layer.mask ? scaleCanvas(layer.mask, width, height) : null,
+        }));
+        const after = { layers, width, height };
+        set({ ...after, documentDialog: null });
+        get().requestRedraw();
+
+        useHistoryStore.getState().push({
+          label: 'Image Size',
+          undo: () => {
+            useEditorStore.setState({ layers: before.layers, width: before.width, height: before.height });
+            useEditorStore.getState().requestRedraw();
+          },
+          redo: () => {
+            useEditorStore.setState({ layers: after.layers, width: after.width, height: after.height });
+            useEditorStore.getState().requestRedraw();
+          },
+        });
+        return;
+      }
+
+      if (dialog.mode === 'canvas-size') {
+        const width = Math.max(1, Math.round(dialog.width));
+        const height = Math.max(1, Math.round(dialog.height));
+        const state = get();
+        const offsetX = Math.round((width - state.width) * (dialog.anchorX / 2));
+        const offsetY = Math.round((height - state.height) * (dialog.anchorY / 2));
+        const before = { layers: state.layers, width: state.width, height: state.height };
+        const layers = state.layers.map((layer) => ({
+          ...layer,
+          canvas: resizeCanvas(layer.canvas, width, height, offsetX, offsetY),
+          mask: layer.mask ? resizeMaskCanvas(layer.mask, width, height, offsetX, offsetY) : null,
+        }));
+        const after = { layers, width, height };
+        set({ ...after, documentDialog: null, selection: null });
+        get().requestRedraw();
+
+        useHistoryStore.getState().push({
+          label: 'Canvas Size',
+          undo: () => {
+            useEditorStore.setState({ layers: before.layers, width: before.width, height: before.height });
+            useEditorStore.getState().requestRedraw();
+          },
+          redo: () => {
+            useEditorStore.setState({ layers: after.layers, width: after.width, height: after.height });
+            useEditorStore.getState().requestRedraw();
+          },
+        });
+        return;
+      }
+
+      if (dialog.mode === 'export') {
+        const state = get();
+        const composite = compositeAllLayers(state.layers, state.width, state.height);
+        const mimeType = dialog.format === 'jpeg' ? 'image/jpeg' : 'image/png';
+        const extension = dialog.format === 'jpeg' ? 'jpg' : 'png';
+        const quality = dialog.format === 'jpeg' ? dialog.quality : undefined;
+
+        if (dialog.format === 'jpeg') {
+          // JPEG has no alpha channel; flatten onto white first.
+          const flattened = document.createElement('canvas');
+          flattened.width = state.width;
+          flattened.height = state.height;
+          const ctx = flattened.getContext('2d')!;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, state.width, state.height);
+          ctx.drawImage(composite, 0, 0);
+          flattened.toBlob(
+            (blob) => {
+              if (blob) downloadBlob(blob, `${dialog.filename || 'pixelforge-export'}.${extension}`);
+            },
+            mimeType,
+            quality,
+          );
+        } else {
+          composite.toBlob((blob) => {
+            if (blob) downloadBlob(blob, `${dialog.filename || 'pixelforge-export'}.${extension}`);
+          }, mimeType);
+        }
+
+        set({ documentDialog: null });
+        return;
+      }
+    },
+
+    importImageFile: (file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const state = get();
+          const before = { layers: state.layers, activeLayerId: state.activeLayerId };
+          const layer = createLayer(state.width, state.height, file.name.replace(/\.[^.]+$/, ''));
+          layer.canvas.getContext('2d')!.drawImage(img, 0, 0);
+          const index = state.layers.findIndex((l) => l.id === state.activeLayerId);
+          const insertAt = index === -1 ? state.layers.length : index + 1;
+          const layers = [
+            ...state.layers.slice(0, insertAt),
+            layer,
+            ...state.layers.slice(insertAt),
+          ];
+          const after = { layers, activeLayerId: layer.id };
+          set({ ...after, activeEditTarget: 'pixels' });
+          get().requestRedraw();
+          withLayersCommand('Place Image', before, after);
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    },
   };
 });
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

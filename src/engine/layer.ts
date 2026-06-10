@@ -163,6 +163,36 @@ export function flipCanvasVertical(source: HTMLCanvasElement): HTMLCanvasElement
   return canvas;
 }
 
+/** Returns a copy of a canvas resized to new dimensions, placing the original content at the given offset (no scaling). Transparent fill. */
+export function resizeCanvas(source: HTMLCanvasElement, newWidth: number, newHeight: number, offsetX: number, offsetY: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = newWidth;
+  canvas.height = newHeight;
+  canvas.getContext('2d')!.drawImage(source, offsetX, offsetY);
+  return canvas;
+}
+
+/** Like resizeCanvas, but fills new areas opaque white (used for layer masks, where opaque = visible). */
+export function resizeMaskCanvas(source: HTMLCanvasElement, newWidth: number, newHeight: number, offsetX: number, offsetY: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = newWidth;
+  canvas.height = newHeight;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, newWidth, newHeight);
+  ctx.drawImage(source, offsetX, offsetY);
+  return canvas;
+}
+
+/** Returns a copy of a canvas scaled to fill new dimensions. */
+export function scaleCanvas(source: HTMLCanvasElement, newWidth: number, newHeight: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = newWidth;
+  canvas.height = newHeight;
+  canvas.getContext('2d')!.drawImage(source, 0, 0, newWidth, newHeight);
+  return canvas;
+}
+
 /** Returns a copy of a canvas rotated 90deg, cropped back to the original dimensions. */
 export function rotateCanvas90(source: HTMLCanvasElement, direction: 'cw' | 'ccw'): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
