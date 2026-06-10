@@ -10,6 +10,7 @@ import {
   rotateCanvas90,
 } from '../engine/layer';
 import { clipToSelection } from '../engine/selection';
+import { getFilter } from '../filters';
 import type {
   BlendMode,
   EditTarget,
@@ -100,6 +101,19 @@ interface EditorState {
 
   flipActiveLayer: (direction: FlipDirection) => void;
   rotateActiveLayer: (direction: RotateDirection) => void;
+
+  /** Open filter dialog (param filters) with its live preview applied to the layer. */
+  filterDialog: {
+    filterId: string;
+    layerId: string;
+    editTarget: EditTarget;
+    params: Record<string, number>;
+  } | null;
+  /** Opens the dialog for param filters; applies immediately for instant ones. */
+  openFilter: (filterId: string) => void;
+  updateFilterParams: (params: Record<string, number>) => void;
+  applyFilterDialog: () => void;
+  cancelFilterDialog: () => void;
 }
 
 const INITIAL_WIDTH = 1024;
@@ -118,6 +132,51 @@ function withLayersCommand(
 }
 
 export const useEditorStore = create<EditorState>((set, get) => {
+  /** Pristine copy of the layer pixels taken when a filter dialog opens, used for preview/cancel. */
+  let filterBackup: { original: ImageData; source: HTMLCanvasElement } | null = null;
+
+  function findFilterTarget(layerId: string, editTarget: EditTarget): HTMLCanvasElement | null {
+    const layer = get().layers.find((l) => l.id === layerId);
+    if (!layer) return null;
+    return editTarget === 'mask' ? layer.mask : layer.canvas;
+  }
+
+  /** Draws the filtered source onto the target, limited to the active selection. */
+  function renderFilterResult(
+    target: HTMLCanvasElement,
+    source: HTMLCanvasElement,
+    filterId: string,
+    params: Record<string, number>,
+  ) {
+    const filter = getFilter(filterId);
+    if (!filter) return;
+    const filtered = filter.apply(source, params);
+    const ctx = target.getContext('2d')!;
+    ctx.save();
+    clipToSelection(ctx, get().selection);
+    ctx.clearRect(0, 0, target.width, target.height);
+    ctx.drawImage(filtered, 0, 0);
+    ctx.restore();
+  }
+
+  function pushFilterCommand(label: string, layerId: string, editTarget: EditTarget, before: ImageData, after: ImageData) {
+    useHistoryStore.getState().push({
+      label,
+      undo: () => {
+        const canvas = findFilterTarget(layerId, editTarget);
+        if (!canvas) return;
+        restoreCanvasImageData(canvas, before);
+        useEditorStore.getState().requestRedraw();
+      },
+      redo: () => {
+        const canvas = findFilterTarget(layerId, editTarget);
+        if (!canvas) return;
+        restoreCanvasImageData(canvas, after);
+        useEditorStore.getState().requestRedraw();
+      },
+    });
+  }
+
   const baseLayer = createLayer(INITIAL_WIDTH, INITIAL_HEIGHT, 'Background');
   // Fill the background layer with white so the canvas isn't transparent.
   const ctx = baseLayer.canvas.getContext('2d')!;
@@ -470,6 +529,73 @@ export const useEditorStore = create<EditorState>((set, get) => {
           useEditorStore.getState().requestRedraw();
         },
       });
+    },
+
+    filterDialog: null,
+
+    openFilter: (filterId) => {
+      const state = get();
+      const filter = getFilter(filterId);
+      if (!filter || state.filterDialog) return;
+
+      const layer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (!layer || layer.locked || !layer.visible) return;
+      const target = state.activeEditTarget === 'mask' ? layer.mask : layer.canvas;
+      if (!target) return;
+
+      const original = cloneCanvasImageData(target);
+      const source = document.createElement('canvas');
+      source.width = target.width;
+      source.height = target.height;
+      source.getContext('2d')!.drawImage(target, 0, 0);
+
+      const params = Object.fromEntries(filter.params.map((p) => [p.id, p.defaultValue]));
+
+      if (filter.params.length === 0) {
+        renderFilterResult(target, source, filterId, params);
+        get().requestRedraw();
+        pushFilterCommand(filter.label, layer.id, state.activeEditTarget, original, cloneCanvasImageData(target));
+        return;
+      }
+
+      filterBackup = { original, source };
+      set({ filterDialog: { filterId, layerId: layer.id, editTarget: state.activeEditTarget, params } });
+      renderFilterResult(target, source, filterId, params);
+      get().requestRedraw();
+    },
+
+    updateFilterParams: (params) => {
+      const dialog = get().filterDialog;
+      if (!dialog || !filterBackup) return;
+      const target = findFilterTarget(dialog.layerId, dialog.editTarget);
+      if (!target) return;
+      const merged = { ...dialog.params, ...params };
+      set({ filterDialog: { ...dialog, params: merged } });
+      renderFilterResult(target, filterBackup.source, dialog.filterId, merged);
+      get().requestRedraw();
+    },
+
+    applyFilterDialog: () => {
+      const dialog = get().filterDialog;
+      if (!dialog || !filterBackup) return;
+      const target = findFilterTarget(dialog.layerId, dialog.editTarget);
+      const filter = getFilter(dialog.filterId);
+      if (target && filter) {
+        pushFilterCommand(filter.label, dialog.layerId, dialog.editTarget, filterBackup.original, cloneCanvasImageData(target));
+      }
+      filterBackup = null;
+      set({ filterDialog: null });
+    },
+
+    cancelFilterDialog: () => {
+      const dialog = get().filterDialog;
+      if (dialog && filterBackup) {
+        const target = findFilterTarget(dialog.layerId, dialog.editTarget);
+        if (target) restoreCanvasImageData(target, filterBackup.original);
+        get().requestRedraw();
+      }
+      filterBackup = null;
+      set({ filterDialog: null });
     },
   };
 });

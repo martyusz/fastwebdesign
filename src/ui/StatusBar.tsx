@@ -18,7 +18,7 @@ export function StatusBar() {
       <span>
         Layer: <span className="text-zinc-300">{activeLayer?.name}</span>
       </span>
-      <span className="mono">PixelForge v0.1 · Phase 3</span>
+      <span className="mono">PixelForge v0.1 · Phase 4</span>
     </footer>
   );
 }

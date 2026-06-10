@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { CanvasArea } from './ui/CanvasArea';
+import { FilterDialog } from './ui/FilterDialog';
 import { LeftToolbar } from './ui/LeftToolbar';
 import { RightPanel } from './ui/RightPanel';
 import { StatusBar } from './ui/StatusBar';
@@ -43,8 +44,14 @@ function App() {
 
       if (key === 'escape') {
         const state = useEditorStore.getState();
-        if (state.cropRect) state.cancelCrop();
+        if (state.filterDialog) state.cancelFilterDialog();
+        else if (state.cropRect) state.cancelCrop();
         else if (state.selection) state.clearSelection();
+        return;
+      }
+
+      if (key === 'enter' && useEditorStore.getState().filterDialog) {
+        useEditorStore.getState().applyFilterDialog();
         return;
       }
 
@@ -67,7 +74,7 @@ function App() {
   }, [setActiveTool, undo, redo]);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#0d0d0f] text-zinc-100">
+    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-[#0d0d0f] text-zinc-100">
       <TopMenuBar />
       <div className="flex flex-1 min-h-0">
         <LeftToolbar />
@@ -75,6 +82,7 @@ function App() {
         <RightPanel />
       </div>
       <StatusBar />
+      <FilterDialog />
     </div>
   );
 }

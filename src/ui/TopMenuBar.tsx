@@ -30,6 +30,9 @@ export function TopMenuBar() {
   const setZoom = useEditorStore((s) => s.setZoom);
   const width = useEditorStore((s) => s.width);
   const height = useEditorStore((s) => s.height);
+  const openFilter = useEditorStore((s) => s.openFilter);
+  const activeLayer = useEditorStore((s) => s.layers.find((l) => l.id === s.activeLayerId));
+  const layerEditable = Boolean(activeLayer && !activeLayer.locked && activeLayer.visible);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -68,9 +71,12 @@ export function TopMenuBar() {
     {
       label: 'Filter',
       items: [
-        { label: 'Brightness / Contrast…', disabled: true },
-        { label: 'Gaussian Blur…', disabled: true },
-        { label: 'Grayscale', disabled: true },
+        { label: 'Brightness / Contrast…', onClick: () => openFilter('brightness-contrast'), disabled: !layerEditable },
+        { label: 'Hue / Saturation…', onClick: () => openFilter('hue-saturation'), disabled: !layerEditable },
+        { label: 'Gaussian Blur…', onClick: () => openFilter('gaussian-blur'), disabled: !layerEditable },
+        { label: 'Grayscale', onClick: () => openFilter('grayscale'), disabled: !layerEditable },
+        { label: 'Invert', onClick: () => openFilter('invert'), disabled: !layerEditable },
+        { label: 'Sepia', onClick: () => openFilter('sepia'), disabled: !layerEditable },
       ],
     },
     {
