@@ -1,3 +1,4 @@
+import { clipToSelection } from '../engine/selection';
 import type { DrawingTool, Point, ToolContext } from './types';
 
 /**
@@ -16,6 +17,7 @@ export function createStrokeTool(
     const layerCtx = ctx.target.getContext('2d')!;
 
     layerCtx.save();
+    clipToSelection(layerCtx, ctx.selection);
     layerCtx.globalCompositeOperation = compositeOperation;
     layerCtx.lineCap = 'round';
     layerCtx.lineJoin = 'round';

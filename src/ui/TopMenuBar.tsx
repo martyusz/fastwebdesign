@@ -24,6 +24,8 @@ export function TopMenuBar() {
   const redo = useHistoryStore((s) => s.redo);
   const canUndo = useHistoryStore((s) => s.past.length > 0);
   const canRedo = useHistoryStore((s) => s.future.length > 0);
+  const selection = useEditorStore((s) => s.selection);
+  const clearSelection = useEditorStore((s) => s.clearSelection);
   const zoom = useEditorStore((s) => s.zoom);
   const setZoom = useEditorStore((s) => s.setZoom);
   const width = useEditorStore((s) => s.width);
@@ -53,6 +55,7 @@ export function TopMenuBar() {
       items: [
         { label: 'Undo', shortcut: 'Ctrl+Z', onClick: undo, disabled: !canUndo },
         { label: 'Redo', shortcut: 'Ctrl+Shift+Z', onClick: redo, disabled: !canRedo },
+        { label: 'Deselect', shortcut: 'Ctrl+D', onClick: clearSelection, disabled: !selection },
       ],
     },
     {

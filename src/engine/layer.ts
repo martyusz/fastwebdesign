@@ -1,4 +1,4 @@
-import type { Layer } from './types';
+import { BLEND_MODE_TO_COMPOSITE, type Layer } from './types';
 
 let layerCounter = 0;
 
@@ -112,4 +112,65 @@ export function compositeLayerWithMask(layer: Layer, target: HTMLCanvasElement):
     ctx.drawImage(layer.mask, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
   }
+}
+
+/** Flattens all visible layers (respecting mask, opacity, blend mode) into one canvas. */
+export function compositeAllLayers(layers: Layer[], width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+
+  for (const layer of layers) {
+    if (!layer.visible) continue;
+    let source: HTMLCanvasElement = layer.canvas;
+    if (layer.mask) {
+      const masked = document.createElement('canvas');
+      compositeLayerWithMask(layer, masked);
+      source = masked;
+    }
+    ctx.save();
+    ctx.globalAlpha = layer.opacity;
+    ctx.globalCompositeOperation = BLEND_MODE_TO_COMPOSITE[layer.blendMode];
+    ctx.drawImage(source, 0, 0);
+    ctx.restore();
+  }
+
+  return canvas;
+}
+
+/** Returns a horizontally-flipped copy of a canvas (same dimensions). */
+export function flipCanvasHorizontal(source: HTMLCanvasElement): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = source.width;
+  canvas.height = source.height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(source, 0, 0);
+  return canvas;
+}
+
+/** Returns a vertically-flipped copy of a canvas (same dimensions). */
+export function flipCanvasVertical(source: HTMLCanvasElement): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = source.width;
+  canvas.height = source.height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.translate(0, canvas.height);
+  ctx.scale(1, -1);
+  ctx.drawImage(source, 0, 0);
+  return canvas;
+}
+
+/** Returns a copy of a canvas rotated 90deg, cropped back to the original dimensions. */
+export function rotateCanvas90(source: HTMLCanvasElement, direction: 'cw' | 'ccw'): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = source.width;
+  canvas.height = source.height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((direction === 'cw' ? 1 : -1) * (Math.PI / 2));
+  ctx.drawImage(source, -source.width / 2, -source.height / 2);
+  return canvas;
 }

@@ -18,6 +18,31 @@ function PanelSection({ title, children }: { title: string; children: ReactNode 
   );
 }
 
+const FONT_FAMILIES = [
+  'Inter, sans-serif',
+  'Arial, sans-serif',
+  'Georgia, serif',
+  '"Times New Roman", serif',
+  '"Courier New", monospace',
+  'Impact, sans-serif',
+];
+
+const TEXT_ALIGNS: CanvasTextAlign[] = ['left', 'center', 'right'];
+
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="flex items-center justify-between text-xs text-zinc-400">
+      {label}
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-7 w-12 cursor-pointer rounded border border-black/40 bg-transparent p-0.5"
+      />
+    </label>
+  );
+}
+
 function PropertiesPanel() {
   const activeTool = useEditorStore((s) => s.activeTool);
   const brushSize = useEditorStore((s) => s.brushSize);
@@ -27,59 +52,238 @@ function PropertiesPanel() {
   const setBrushHardness = useEditorStore((s) => s.setBrushHardness);
   const setBrushColor = useEditorStore((s) => s.setBrushColor);
 
-  const showBrushProps = ['brush', 'eraser', 'pencil'].includes(activeTool);
+  const secondaryColor = useEditorStore((s) => s.secondaryColor);
+  const setSecondaryColor = useEditorStore((s) => s.setSecondaryColor);
 
-  if (!showBrushProps) {
-    return <p className="text-xs text-zinc-500">No options for the selected tool yet.</p>;
+  const fontFamily = useEditorStore((s) => s.fontFamily);
+  const fontSize = useEditorStore((s) => s.fontSize);
+  const textAlign = useEditorStore((s) => s.textAlign);
+  const setFontFamily = useEditorStore((s) => s.setFontFamily);
+  const setFontSize = useEditorStore((s) => s.setFontSize);
+  const setTextAlign = useEditorStore((s) => s.setTextAlign);
+
+  const selection = useEditorStore((s) => s.selection);
+  const clearSelection = useEditorStore((s) => s.clearSelection);
+
+  const flipActiveLayer = useEditorStore((s) => s.flipActiveLayer);
+  const rotateActiveLayer = useEditorStore((s) => s.rotateActiveLayer);
+
+  const sizeField = (
+    <label className="flex flex-col gap-1 text-xs text-zinc-400">
+      <span className="flex justify-between">
+        Size
+        <span className="mono text-zinc-300">{brushSize}px</span>
+      </span>
+      <input
+        type="range"
+        min={1}
+        max={300}
+        value={brushSize}
+        onChange={(e) => setBrushSize(Number(e.target.value))}
+        className="accent-[#7c5cff]"
+      />
+    </label>
+  );
+
+  const hardnessField = (
+    <label className="flex flex-col gap-1 text-xs text-zinc-400">
+      <span className="flex justify-between">
+        Hardness
+        <span className="mono text-zinc-300">{brushHardness}%</span>
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={brushHardness}
+        onChange={(e) => setBrushHardness(Number(e.target.value))}
+        className="accent-[#7c5cff]"
+      />
+    </label>
+  );
+
+  const colorField = <ColorField label="Color" value={brushColor} onChange={setBrushColor} />;
+
+  const selectionInfo = selection && (
+    <div className="flex items-center justify-between rounded border border-black/40 bg-black/20 px-2 py-1.5 text-xs text-zinc-400">
+      <span>
+        Selection: <span className="mono text-zinc-300">{Math.round(selection.bounds.width)} × {Math.round(selection.bounds.height)}</span>
+      </span>
+      <button type="button" onClick={() => clearSelection()} className="text-[#7c5cff] hover:text-[#9b85ff]">
+        Deselect
+      </button>
+    </div>
+  );
+
+  if (activeTool === 'brush' || activeTool === 'eraser' || activeTool === 'pencil') {
+    return (
+      <div className="flex flex-col gap-3">
+        {sizeField}
+        {activeTool !== 'pencil' && hardnessField}
+        {activeTool !== 'eraser' && colorField}
+        {selectionInfo}
+      </div>
+    );
   }
 
-  return (
-    <div className="flex flex-col gap-3">
-      <label className="flex flex-col gap-1 text-xs text-zinc-400">
-        <span className="flex justify-between">
-          Size
-          <span className="mono text-zinc-300">{brushSize}px</span>
-        </span>
-        <input
-          type="range"
-          min={1}
-          max={300}
-          value={brushSize}
-          onChange={(e) => setBrushSize(Number(e.target.value))}
-          className="accent-[#7c5cff]"
-        />
-      </label>
+  if (activeTool === 'bucket') {
+    return (
+      <div className="flex flex-col gap-3">
+        {colorField}
+        <p className="text-xs text-zinc-500">Click to flood-fill the area under the cursor.</p>
+        {selectionInfo}
+      </div>
+    );
+  }
 
-      {activeTool !== 'pencil' && (
+  if (activeTool === 'gradient') {
+    return (
+      <div className="flex flex-col gap-3">
+        {colorField}
+        <ColorField label="To" value={secondaryColor} onChange={setSecondaryColor} />
+        <p className="text-xs text-zinc-500">Drag across the canvas to apply the gradient.</p>
+        {selectionInfo}
+      </div>
+    );
+  }
+
+  if (activeTool === 'rectangle' || activeTool === 'ellipse') {
+    return (
+      <div className="flex flex-col gap-3">
+        {colorField}
+        {selectionInfo}
+      </div>
+    );
+  }
+
+  if (activeTool === 'line') {
+    return (
+      <div className="flex flex-col gap-3">
+        {sizeField}
+        {colorField}
+        {selectionInfo}
+      </div>
+    );
+  }
+
+  if (activeTool === 'text') {
+    return (
+      <div className="flex flex-col gap-3">
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          <span>Font</span>
+          <select
+            value={fontFamily}
+            onChange={(e) => setFontFamily(e.target.value)}
+            className="rounded border border-black/40 bg-black/30 px-2 py-1 text-zinc-200 focus:outline-none focus:ring-1 focus:ring-[#7c5cff]"
+          >
+            {FONT_FAMILIES.map((font) => (
+              <option key={font} value={font} style={{ fontFamily: font }}>
+                {font.split(',')[0].replace(/"/g, '')}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label className="flex flex-col gap-1 text-xs text-zinc-400">
           <span className="flex justify-between">
-            Hardness
-            <span className="mono text-zinc-300">{brushHardness}%</span>
+            Size
+            <span className="mono text-zinc-300">{fontSize}px</span>
           </span>
           <input
             type="range"
-            min={0}
-            max={100}
-            value={brushHardness}
-            onChange={(e) => setBrushHardness(Number(e.target.value))}
+            min={8}
+            max={200}
+            value={fontSize}
+            onChange={(e) => setFontSize(Number(e.target.value))}
             className="accent-[#7c5cff]"
           />
         </label>
-      )}
 
-      {activeTool !== 'eraser' && (
-        <label className="flex items-center justify-between text-xs text-zinc-400">
-          Color
-          <input
-            type="color"
-            value={brushColor}
-            onChange={(e) => setBrushColor(e.target.value)}
-            className="h-7 w-12 cursor-pointer rounded border border-black/40 bg-transparent p-0.5"
-          />
-        </label>
-      )}
-    </div>
-  );
+        <div className="flex flex-col gap-1 text-xs text-zinc-400">
+          <span>Alignment</span>
+          <div className="flex gap-1">
+            {TEXT_ALIGNS.map((align) => (
+              <button
+                key={align}
+                type="button"
+                onClick={() => setTextAlign(align)}
+                className={`flex-1 rounded px-2 py-1 capitalize transition-colors ${
+                  textAlign === align
+                    ? 'bg-[#7c5cff] text-white'
+                    : 'bg-black/30 text-zinc-400 hover:text-white'
+                }`}
+              >
+                {align}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {colorField}
+        <p className="text-xs text-zinc-500">Click on the canvas to place a text box, then type.</p>
+      </div>
+    );
+  }
+
+  if (activeTool === 'transform') {
+    const buttonClass =
+      'rounded border border-black/40 bg-black/20 px-2 py-1.5 text-xs text-zinc-300 hover:bg-white/5 hover:text-white transition-colors';
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500">Applies to the active layer.</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button type="button" className={buttonClass} onClick={() => flipActiveLayer('horizontal')}>
+            Flip Horizontal
+          </button>
+          <button type="button" className={buttonClass} onClick={() => flipActiveLayer('vertical')}>
+            Flip Vertical
+          </button>
+          <button type="button" className={buttonClass} onClick={() => rotateActiveLayer('cw')}>
+            Rotate 90° CW
+          </button>
+          <button type="button" className={buttonClass} onClick={() => rotateActiveLayer('ccw')}>
+            Rotate 90° CCW
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTool === 'marquee' || activeTool === 'lasso') {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500">
+          {activeTool === 'marquee'
+            ? 'Drag to make a rectangular selection.'
+            : 'Drag to trace a freehand selection.'}
+        </p>
+        {selectionInfo ?? <p className="text-xs text-zinc-600">No active selection.</p>}
+      </div>
+    );
+  }
+
+  if (activeTool === 'move') {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500">
+          {selection
+            ? 'Drag inside the selection to move those pixels.'
+            : 'Drag to move the active layer.'}
+        </p>
+        {selectionInfo}
+      </div>
+    );
+  }
+
+  if (activeTool === 'eyedropper') {
+    return <p className="text-xs text-zinc-500">Click anywhere on the canvas to pick a color.</p>;
+  }
+
+  if (activeTool === 'crop') {
+    return <p className="text-xs text-zinc-500">Drag to define the crop area, then apply or cancel.</p>;
+  }
+
+  return <p className="text-xs text-zinc-500">No options for the selected tool yet.</p>;
 }
 
 function LayerPropertiesPanel() {

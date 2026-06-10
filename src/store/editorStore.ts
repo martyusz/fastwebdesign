@@ -1,6 +1,26 @@
 import { create } from 'zustand';
-import { createLayer, createMaskCanvas, duplicateLayer as cloneLayer } from '../engine/layer';
-import type { BlendMode, EditTarget, Layer, ToolName } from '../engine/types';
+import {
+  cloneCanvasImageData,
+  createLayer,
+  createMaskCanvas,
+  duplicateLayer as cloneLayer,
+  flipCanvasHorizontal,
+  flipCanvasVertical,
+  restoreCanvasImageData,
+  rotateCanvas90,
+} from '../engine/layer';
+import { clipToSelection } from '../engine/selection';
+import type {
+  BlendMode,
+  EditTarget,
+  FlipDirection,
+  Layer,
+  Point,
+  RotateDirection,
+  SelectionState,
+  ToolName,
+  ToolPreview,
+} from '../engine/types';
 import { useHistoryStore } from './historyStore';
 
 interface EditorState {
@@ -44,6 +64,42 @@ interface EditorState {
 
   addLayerMask: (layerId: string) => void;
   removeLayerMask: (layerId: string) => void;
+
+  /** Active marquee/lasso selection that paint operations are clipped to. */
+  selection: SelectionState | null;
+  setSelection: (selection: SelectionState | null) => void;
+  clearSelection: () => void;
+
+  /** Live preview shown while a drag-based tool (shape, gradient, marquee, lasso, crop) is active. */
+  toolPreview: ToolPreview | null;
+  setToolPreview: (preview: ToolPreview | null) => void;
+
+  /** Secondary color, used as the gradient tool's end stop. */
+  secondaryColor: string;
+  setSecondaryColor: (color: string) => void;
+
+  fontFamily: string;
+  fontSize: number;
+  textAlign: CanvasTextAlign;
+  setFontFamily: (font: string) => void;
+  setFontSize: (size: number) => void;
+  setTextAlign: (align: CanvasTextAlign) => void;
+
+  /** In-progress on-canvas text editor (text tool). */
+  textEditor: { x: number; y: number; value: string } | null;
+  openTextEditor: (point: Point) => void;
+  updateTextEditorValue: (value: string) => void;
+  commitTextEditor: () => void;
+  cancelTextEditor: () => void;
+
+  /** Pending crop rectangle (crop tool), in document coordinates. */
+  cropRect: { x: number; y: number; width: number; height: number } | null;
+  setCropRect: (rect: { x: number; y: number; width: number; height: number } | null) => void;
+  applyCrop: () => void;
+  cancelCrop: () => void;
+
+  flipActiveLayer: (direction: FlipDirection) => void;
+  rotateActiveLayer: (direction: RotateDirection) => void;
 }
 
 const INITIAL_WIDTH = 1024;
@@ -216,5 +272,204 @@ export const useEditorStore = create<EditorState>((set, get) => {
         activeEditTarget:
           state.activeLayerId === layerId ? 'pixels' : state.activeEditTarget,
       })),
+
+    selection: null,
+    setSelection: (selection) => set({ selection }),
+    clearSelection: () => set({ selection: null }),
+
+    toolPreview: null,
+    setToolPreview: (preview) => set({ toolPreview: preview }),
+
+    secondaryColor: '#ffffff',
+    setSecondaryColor: (color) => set({ secondaryColor: color }),
+
+    fontFamily: 'Inter, sans-serif',
+    fontSize: 48,
+    textAlign: 'left',
+    setFontFamily: (font) => set({ fontFamily: font }),
+    setFontSize: (size) => set({ fontSize: Math.max(1, size) }),
+    setTextAlign: (align) => set({ textAlign: align }),
+
+    textEditor: null,
+    openTextEditor: (point) => set({ textEditor: { x: point.x, y: point.y, value: '' } }),
+    updateTextEditorValue: (value) =>
+      set((state) => (state.textEditor ? { textEditor: { ...state.textEditor, value } } : {})),
+    cancelTextEditor: () => set({ textEditor: null }),
+
+    commitTextEditor: () => {
+      const state = get();
+      const editor = state.textEditor;
+      if (!editor || !editor.value.trim()) {
+        set({ textEditor: null });
+        return;
+      }
+      const layer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (!layer) {
+        set({ textEditor: null });
+        return;
+      }
+      const target = state.activeEditTarget === 'mask' ? layer.mask : layer.canvas;
+      if (!target) {
+        set({ textEditor: null });
+        return;
+      }
+
+      const before = cloneCanvasImageData(target);
+      const ctx = target.getContext('2d')!;
+      ctx.save();
+      clipToSelection(ctx, state.selection);
+      ctx.fillStyle = state.brushColor;
+      ctx.font = `${state.fontSize}px ${state.fontFamily}`;
+      ctx.textAlign = state.textAlign;
+      ctx.textBaseline = 'top';
+      const lineHeight = state.fontSize * 1.2;
+      editor.value.split('\n').forEach((line, i) => {
+        ctx.fillText(line, editor.x, editor.y + i * lineHeight);
+      });
+      ctx.restore();
+      const after = cloneCanvasImageData(target);
+
+      set({ textEditor: null });
+      get().requestRedraw();
+
+      const layerId = layer.id;
+      const editTarget = state.activeEditTarget;
+      useHistoryStore.getState().push({
+        label: 'Add Text',
+        undo: () => {
+          const l = useEditorStore.getState().layers.find((l) => l.id === layerId);
+          const canvas = editTarget === 'mask' ? l?.mask : l?.canvas;
+          if (!canvas) return;
+          restoreCanvasImageData(canvas, before);
+          useEditorStore.getState().requestRedraw();
+        },
+        redo: () => {
+          const l = useEditorStore.getState().layers.find((l) => l.id === layerId);
+          const canvas = editTarget === 'mask' ? l?.mask : l?.canvas;
+          if (!canvas) return;
+          restoreCanvasImageData(canvas, after);
+          useEditorStore.getState().requestRedraw();
+        },
+      });
+    },
+
+    cropRect: null,
+    setCropRect: (rect) => set({ cropRect: rect }),
+    cancelCrop: () => set({ cropRect: null }),
+
+    applyCrop: () => {
+      const state = get();
+      const rect = state.cropRect;
+      if (!rect) return;
+
+      const x = Math.max(0, Math.min(state.width, Math.round(rect.x)));
+      const y = Math.max(0, Math.min(state.height, Math.round(rect.y)));
+      const width = Math.max(1, Math.min(state.width - x, Math.round(rect.width)));
+      const height = Math.max(1, Math.min(state.height - y, Math.round(rect.height)));
+
+      if (width < 2 || height < 2) {
+        set({ cropRect: null });
+        return;
+      }
+
+      const before = { layers: state.layers, width: state.width, height: state.height };
+
+      function cropCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d')!.drawImage(source, -x, -y);
+        return canvas;
+      }
+
+      const layers = state.layers.map((layer) => ({
+        ...layer,
+        canvas: cropCanvas(layer.canvas),
+        mask: layer.mask ? cropCanvas(layer.mask) : null,
+      }));
+
+      const after = { layers, width, height };
+      set({ ...after, cropRect: null, selection: null });
+      get().requestRedraw();
+
+      useHistoryStore.getState().push({
+        label: 'Crop Canvas',
+        undo: () => {
+          useEditorStore.setState({ layers: before.layers, width: before.width, height: before.height });
+          useEditorStore.getState().requestRedraw();
+        },
+        redo: () => {
+          useEditorStore.setState({ layers: after.layers, width: after.width, height: after.height });
+          useEditorStore.getState().requestRedraw();
+        },
+      });
+    },
+
+    flipActiveLayer: (direction) => {
+      const state = get();
+      const layer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (!layer) return;
+
+      const flip = direction === 'horizontal' ? flipCanvasHorizontal : flipCanvasVertical;
+      const newCanvas = flip(layer.canvas);
+      const newMask = layer.mask ? flip(layer.mask) : null;
+      const oldCanvas = layer.canvas;
+      const oldMask = layer.mask;
+      const layerId = layer.id;
+
+      set((s) => ({
+        layers: s.layers.map((l) => (l.id === layerId ? { ...l, canvas: newCanvas, mask: newMask } : l)),
+      }));
+      get().requestRedraw();
+
+      useHistoryStore.getState().push({
+        label: direction === 'horizontal' ? 'Flip Horizontal' : 'Flip Vertical',
+        undo: () => {
+          useEditorStore.setState((s) => ({
+            layers: s.layers.map((l) => (l.id === layerId ? { ...l, canvas: oldCanvas, mask: oldMask } : l)),
+          }));
+          useEditorStore.getState().requestRedraw();
+        },
+        redo: () => {
+          useEditorStore.setState((s) => ({
+            layers: s.layers.map((l) => (l.id === layerId ? { ...l, canvas: newCanvas, mask: newMask } : l)),
+          }));
+          useEditorStore.getState().requestRedraw();
+        },
+      });
+    },
+
+    rotateActiveLayer: (direction) => {
+      const state = get();
+      const layer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (!layer) return;
+
+      const newCanvas = rotateCanvas90(layer.canvas, direction);
+      const newMask = layer.mask ? rotateCanvas90(layer.mask, direction) : null;
+      const oldCanvas = layer.canvas;
+      const oldMask = layer.mask;
+      const layerId = layer.id;
+
+      set((s) => ({
+        layers: s.layers.map((l) => (l.id === layerId ? { ...l, canvas: newCanvas, mask: newMask } : l)),
+      }));
+      get().requestRedraw();
+
+      useHistoryStore.getState().push({
+        label: direction === 'cw' ? 'Rotate 90° CW' : 'Rotate 90° CCW',
+        undo: () => {
+          useEditorStore.setState((s) => ({
+            layers: s.layers.map((l) => (l.id === layerId ? { ...l, canvas: oldCanvas, mask: oldMask } : l)),
+          }));
+          useEditorStore.getState().requestRedraw();
+        },
+        redo: () => {
+          useEditorStore.setState((s) => ({
+            layers: s.layers.map((l) => (l.id === layerId ? { ...l, canvas: newCanvas, mask: newMask } : l)),
+          }));
+          useEditorStore.getState().requestRedraw();
+        },
+      });
+    },
   };
 });

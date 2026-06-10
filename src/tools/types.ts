@@ -1,9 +1,6 @@
-import type { Layer } from '../engine/types';
+import type { Layer, Point, SelectionState } from '../engine/types';
 
-export interface Point {
-  x: number;
-  y: number;
-}
+export type { Point };
 
 export interface ToolContext {
   layer: Layer;
@@ -13,6 +10,10 @@ export interface ToolContext {
   brushSize: number;
   brushHardness: number;
   brushColor: string;
+  /** Secondary color, used as the gradient end color. */
+  secondaryColor: string;
+  /** Active selection (if any) that paint operations should be clipped to. */
+  selection: SelectionState | null;
 }
 
 /** A tool that paints directly onto the active layer's pixel buffer. */

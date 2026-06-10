@@ -1,5 +1,5 @@
 import { useEditorStore } from '../store/editorStore';
-import { drawingTools, TOOL_DEFINITIONS } from '../tools';
+import { drawingTools, SPECIAL_TOOLS, TOOL_DEFINITIONS } from '../tools';
 import { ToolIcon } from './icons';
 
 export function LeftToolbar() {
@@ -14,7 +14,12 @@ export function LeftToolbar() {
         const showDivider = tool.group !== lastGroup;
         lastGroup = tool.group;
         const isActive = activeTool === tool.name;
-        const isImplemented = Boolean(drawingTools[tool.name]) || tool.name === 'move' || tool.name === 'hand' || tool.name === 'zoom';
+        const isImplemented =
+          Boolean(drawingTools[tool.name]) ||
+          SPECIAL_TOOLS.includes(tool.name) ||
+          tool.name === 'transform' ||
+          tool.name === 'hand' ||
+          tool.name === 'zoom';
 
         return (
           <div key={tool.name} className="contents">

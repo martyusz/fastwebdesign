@@ -21,7 +21,10 @@ function App() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
-      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) {
+        if (e.key === 'Escape') useEditorStore.getState().cancelTextEditor();
+        return;
+      }
 
       const key = e.key.toLowerCase();
 
@@ -29,6 +32,24 @@ function App() {
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && key === 'd') {
+        e.preventDefault();
+        useEditorStore.getState().clearSelection();
+        return;
+      }
+
+      if (key === 'escape') {
+        const state = useEditorStore.getState();
+        if (state.cropRect) state.cancelCrop();
+        else if (state.selection) state.clearSelection();
+        return;
+      }
+
+      if (key === 'enter' && useEditorStore.getState().cropRect) {
+        useEditorStore.getState().applyCrop();
         return;
       }
 
