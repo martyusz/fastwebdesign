@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { AIPanel } from './ui/AIPanel';
 import { CanvasArea } from './ui/CanvasArea';
 import { DocumentDialog } from './ui/DocumentDialog';
 import { FilterDialog } from './ui/FilterDialog';
@@ -87,6 +88,7 @@ function App() {
         <LeftToolbar />
         <CanvasArea />
         <RightPanel />
+        <AIPanel />
       </div>
       <StatusBar />
       <FilterDialog />

@@ -15,6 +15,7 @@ import {
 } from '../engine/layer';
 import { clipToSelection } from '../engine/selection';
 import { getFilter } from '../filters';
+import { SOCIAL_PRESETS, type SocialPreset } from '../presets';
 import type {
   BlendMode,
   EditTarget,
@@ -32,7 +33,7 @@ import { useHistoryStore } from './historyStore';
 export type AnchorIndex = 0 | 1 | 2;
 
 export type DocumentDialogState =
-  | { mode: 'new'; width: number; height: number; background: 'white' | 'transparent' }
+  | { mode: 'new'; width: number; height: number; background: 'white' | 'transparent'; presetId: string | null }
   | { mode: 'image-size'; width: number; height: number; originalWidth: number; originalHeight: number; maintainAspect: boolean }
   | { mode: 'canvas-size'; width: number; height: number; originalWidth: number; originalHeight: number; anchorX: AnchorIndex; anchorY: AnchorIndex }
   | { mode: 'export'; format: 'png' | 'jpeg'; quality: number; filename: string };
@@ -114,6 +115,17 @@ interface EditorState {
 
   flipActiveLayer: (direction: FlipDirection) => void;
   rotateActiveLayer: (direction: RotateDirection) => void;
+  /** Rotates the active layer by a multiple of 90 degrees (positive = clockwise). */
+  rotateActiveLayerBy: (deg: number) => void;
+
+  /** Applies a filter immediately (used by AI-driven ops), with a single undo entry. */
+  applyFilterDirect: (filterId: string, params: Record<string, number>) => void;
+  /** Crops the document to the given aspect ratio, centered. */
+  cropToAspectRatio: (ratioW: number, ratioH: number) => void;
+  /** Resamples all layers to the given pixel dimensions. */
+  resizeImageTo: (width: number, height: number) => void;
+  /** Replaces the active layer's pixel canvas (e.g. after background removal), with undo support. */
+  replaceActiveLayerCanvas: (canvas: HTMLCanvasElement, label: string) => void;
 
   /** Open filter dialog (param filters) with its live preview applied to the layer. */
   filterDialog: {
@@ -140,6 +152,11 @@ interface EditorState {
 
   /** Imports an image file as a new layer placed at the top-left of the canvas. */
   importImageFile: (file: File) => void;
+
+  /** Social-media preset associated with the current document, if any (for safe-zone guides). */
+  activePreset: SocialPreset | null;
+  showSafeZone: boolean;
+  toggleSafeZone: () => void;
 }
 
 const INITIAL_WIDTH = 1024;
@@ -557,7 +574,109 @@ export const useEditorStore = create<EditorState>((set, get) => {
       });
     },
 
+    replaceActiveLayerCanvas: (canvas, label) => {
+      const state = get();
+      const layer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (!layer) return;
+
+      const newCanvas = canvas;
+      const oldCanvas = layer.canvas;
+      const layerId = layer.id;
+
+      set((s) => ({
+        layers: s.layers.map((l) => (l.id === layerId ? { ...l, canvas: newCanvas } : l)),
+      }));
+      get().requestRedraw();
+
+      useHistoryStore.getState().push({
+        label,
+        undo: () => {
+          useEditorStore.setState((s) => ({
+            layers: s.layers.map((l) => (l.id === layerId ? { ...l, canvas: oldCanvas } : l)),
+          }));
+          useEditorStore.getState().requestRedraw();
+        },
+        redo: () => {
+          useEditorStore.setState((s) => ({
+            layers: s.layers.map((l) => (l.id === layerId ? { ...l, canvas: newCanvas } : l)),
+          }));
+          useEditorStore.getState().requestRedraw();
+        },
+      });
+    },
+
+    rotateActiveLayerBy: (deg) => {
+      let n = Math.round(deg / 90) % 4;
+      if (n < 0) n += 4;
+      for (let i = 0; i < n; i++) get().rotateActiveLayer('cw');
+    },
+
+    cropToAspectRatio: (ratioW, ratioH) => {
+      const state = get();
+      if (ratioW <= 0 || ratioH <= 0) return;
+      const targetRatio = ratioW / ratioH;
+      const currentRatio = state.width / state.height;
+      let width = state.width;
+      let height = state.height;
+      if (currentRatio > targetRatio) {
+        width = Math.round(state.height * targetRatio);
+      } else {
+        height = Math.round(state.width / targetRatio);
+      }
+      set({ cropRect: { x: (state.width - width) / 2, y: (state.height - height) / 2, width, height } });
+      get().applyCrop();
+    },
+
+    resizeImageTo: (rawWidth, rawHeight) => {
+      const width = Math.max(1, Math.round(rawWidth));
+      const height = Math.max(1, Math.round(rawHeight));
+      const state = get();
+      const before = { layers: state.layers, width: state.width, height: state.height };
+      const layers = state.layers.map((layer) => ({
+        ...layer,
+        canvas: scaleCanvas(layer.canvas, width, height),
+        mask: layer.mask ? scaleCanvas(layer.mask, width, height) : null,
+      }));
+      const after = { layers, width, height };
+      set(after);
+      get().requestRedraw();
+
+      useHistoryStore.getState().push({
+        label: 'Image Size',
+        undo: () => {
+          useEditorStore.setState({ layers: before.layers, width: before.width, height: before.height });
+          useEditorStore.getState().requestRedraw();
+        },
+        redo: () => {
+          useEditorStore.setState({ layers: after.layers, width: after.width, height: after.height });
+          useEditorStore.getState().requestRedraw();
+        },
+      });
+    },
+
     filterDialog: null,
+
+    applyFilterDirect: (filterId, params) => {
+      const state = get();
+      const filter = getFilter(filterId);
+      if (!filter || state.filterDialog) return;
+
+      const layer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (!layer || layer.locked || !layer.visible) return;
+      const target = state.activeEditTarget === 'mask' ? layer.mask : layer.canvas;
+      if (!target) return;
+
+      const original = cloneCanvasImageData(target);
+      const source = document.createElement('canvas');
+      source.width = target.width;
+      source.height = target.height;
+      source.getContext('2d')!.drawImage(target, 0, 0);
+
+      const merged = { ...Object.fromEntries(filter.params.map((p) => [p.id, p.defaultValue])), ...params };
+      renderFilterResult(target, source, filterId, merged);
+      get().requestRedraw();
+      pushFilterCommand(filter.label, layer.id, state.activeEditTarget, original, cloneCanvasImageData(target));
+    },
 
     openFilter: (filterId) => {
       const state = get();
@@ -629,7 +748,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     openNewDocumentDialog: () => {
       const state = get();
       if (state.documentDialog) return;
-      set({ documentDialog: { mode: 'new', width: state.width, height: state.height, background: 'white' } });
+      set({ documentDialog: { mode: 'new', width: state.width, height: state.height, background: 'white', presetId: null } });
     },
 
     openImageSizeDialog: () => {
@@ -691,6 +810,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           ctx.fillRect(0, 0, width, height);
         }
         useHistoryStore.getState().reset();
+        const preset = SOCIAL_PRESETS.find((p) => p.id === dialog.presetId) ?? null;
         set({
           width,
           height,
@@ -703,36 +823,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
           filterDialog: null,
           zoom: 1,
           documentDialog: null,
+          activePreset: preset,
+          showSafeZone: preset !== null,
         });
         get().requestRedraw();
         return;
       }
 
       if (dialog.mode === 'image-size') {
-        const width = Math.max(1, Math.round(dialog.width));
-        const height = Math.max(1, Math.round(dialog.height));
-        const state = get();
-        const before = { layers: state.layers, width: state.width, height: state.height };
-        const layers = state.layers.map((layer) => ({
-          ...layer,
-          canvas: scaleCanvas(layer.canvas, width, height),
-          mask: layer.mask ? scaleCanvas(layer.mask, width, height) : null,
-        }));
-        const after = { layers, width, height };
-        set({ ...after, documentDialog: null });
-        get().requestRedraw();
-
-        useHistoryStore.getState().push({
-          label: 'Image Size',
-          undo: () => {
-            useEditorStore.setState({ layers: before.layers, width: before.width, height: before.height });
-            useEditorStore.getState().requestRedraw();
-          },
-          redo: () => {
-            useEditorStore.setState({ layers: after.layers, width: after.width, height: after.height });
-            useEditorStore.getState().requestRedraw();
-          },
-        });
+        get().resizeImageTo(dialog.width, dialog.height);
+        set({ documentDialog: null });
         return;
       }
 
@@ -825,6 +925,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       };
       reader.readAsDataURL(file);
     },
+
+    activePreset: null,
+    showSafeZone: false,
+    toggleSafeZone: () => set((state) => ({ showSafeZone: !state.showSafeZone })),
   };
 });
 

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEditorStore } from '../store/editorStore';
+import { SOCIAL_PRESETS } from '../presets';
 
 const ANCHOR_LABELS = ['↖', '↑', '↗', '←', '•', '→', '↙', '↓', '↘'];
 
@@ -20,8 +21,37 @@ export function DocumentDialog() {
     applyLabel = 'Create';
     body = (
       <>
-        <NumberField label="Width" value={dialog.width} unit="px" onChange={(width) => update({ width })} />
-        <NumberField label="Height" value={dialog.height} unit="px" onChange={(height) => update({ height })} />
+        <label className="flex flex-col gap-1.5 text-xs text-zinc-400">
+          <span>Preset</span>
+          <select
+            value={dialog.presetId ?? 'custom'}
+            onChange={(e) => {
+              const presetId = e.target.value === 'custom' ? null : e.target.value;
+              const preset = SOCIAL_PRESETS.find((p) => p.id === presetId);
+              update(preset ? { presetId, width: preset.width, height: preset.height } : { presetId: null });
+            }}
+            className="rounded bg-white/5 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-[#7c5cff]"
+          >
+            <option value="custom">Custom</option>
+            {SOCIAL_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label} ({preset.width}×{preset.height})
+              </option>
+            ))}
+          </select>
+        </label>
+        <NumberField
+          label="Width"
+          value={dialog.width}
+          unit="px"
+          onChange={(width) => update({ width, presetId: null })}
+        />
+        <NumberField
+          label="Height"
+          value={dialog.height}
+          unit="px"
+          onChange={(height) => update({ height, presetId: null })}
+        />
         <label className="flex flex-col gap-1.5 text-xs text-zinc-400">
           <span>Background</span>
           <div className="flex gap-2">

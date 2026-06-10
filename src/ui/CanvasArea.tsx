@@ -61,6 +61,9 @@ export function CanvasArea() {
   const applyCrop = useEditorStore((s) => s.applyCrop);
   const cancelCrop = useEditorStore((s) => s.cancelCrop);
 
+  const activePreset = useEditorStore((s) => s.activePreset);
+  const showSafeZone = useEditorStore((s) => s.showSafeZone);
+
   const push = useHistoryStore((s) => s.push);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -618,6 +621,20 @@ export function CanvasArea() {
                   dashOffset={-marchOffset / zoom}
                 />
               </>
+            )}
+
+            {/* Social preset safe-zone guide */}
+            {showSafeZone && activePreset && (
+              <Rect
+                x={width * activePreset.safeZoneInset}
+                y={height * activePreset.safeZoneInset}
+                width={width * (1 - activePreset.safeZoneInset * 2)}
+                height={height * (1 - activePreset.safeZoneInset * 2)}
+                stroke="#22cc88"
+                strokeWidth={1.5 / zoom}
+                dash={[6 / zoom, 4 / zoom]}
+                listening={false}
+              />
             )}
           </KonvaLayer>
         </Stage>

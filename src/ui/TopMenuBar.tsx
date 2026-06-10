@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAIStore } from '../store/aiStore';
 import { useEditorStore } from '../store/editorStore';
 import { useHistoryStore } from '../store/historyStore';
 import { Logo } from './Logo';
@@ -38,6 +39,11 @@ export function TopMenuBar() {
   const openImageSizeDialog = useEditorStore((s) => s.openImageSizeDialog);
   const openExportDialog = useEditorStore((s) => s.openExportDialog);
   const importImageFile = useEditorStore((s) => s.importImageFile);
+  const activePreset = useEditorStore((s) => s.activePreset);
+  const showSafeZone = useEditorStore((s) => s.showSafeZone);
+  const toggleSafeZone = useEditorStore((s) => s.toggleSafeZone);
+  const aiPanelOpen = useAIStore((s) => s.panelOpen);
+  const toggleAIPanel = useAIStore((s) => s.togglePanel);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -91,6 +97,11 @@ export function TopMenuBar() {
         { label: 'Zoom In', shortcut: 'Ctrl++', onClick: () => setZoom(zoom * 1.25) },
         { label: 'Zoom Out', shortcut: 'Ctrl+-', onClick: () => setZoom(zoom / 1.25) },
         { label: 'Reset Zoom', shortcut: 'Ctrl+0', onClick: () => setZoom(1) },
+        {
+          label: showSafeZone ? 'Hide Safe Zone ✓' : 'Show Safe Zone',
+          onClick: toggleSafeZone,
+          disabled: !activePreset,
+        },
       ],
     },
   ];
@@ -175,6 +186,16 @@ export function TopMenuBar() {
         <span className="mono text-xs w-12 text-right text-zinc-500">
           {Math.round(zoom * 100)}%
         </span>
+        <button
+          type="button"
+          title="AI Assistant"
+          onClick={toggleAIPanel}
+          className={`p-1.5 rounded hover:bg-white/5 transition-colors ${
+            aiPanelOpen ? 'text-[#7c5cff]' : 'hover:text-white'
+          }`}
+        >
+          <Icon path={ICONS.sparkles} />
+        </button>
       </div>
     </header>
   );
