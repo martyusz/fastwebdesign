@@ -1,4 +1,3 @@
-import { getLayerContext } from '../engine/layer';
 import type { DrawingTool, Point, ToolContext } from './types';
 
 /**
@@ -14,7 +13,7 @@ export function createStrokeTool(
   let lastPoint: Point | null = null;
 
   function strokeSegment(ctx: ToolContext, from: Point, to: Point) {
-    const layerCtx = getLayerContext(ctx.layer);
+    const layerCtx = ctx.target.getContext('2d')!;
 
     layerCtx.save();
     layerCtx.globalCompositeOperation = compositeOperation;

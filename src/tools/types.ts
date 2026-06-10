@@ -7,6 +7,8 @@ export interface Point {
 
 export interface ToolContext {
   layer: Layer;
+  /** The pixel buffer being painted onto (the layer's canvas, or its mask). */
+  target: HTMLCanvasElement;
   point: Point;
   brushSize: number;
   brushHardness: number;

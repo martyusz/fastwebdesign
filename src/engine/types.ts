@@ -24,7 +24,12 @@ export interface Layer {
   blendMode: BlendMode;
   /** Offscreen canvas holding this layer's pixel data. */
   canvas: HTMLCanvasElement;
+  /** Optional layer mask: alpha channel controls visibility (opaque = visible). */
+  mask: HTMLCanvasElement | null;
 }
+
+/** Which canvas drawing tools currently target for the active layer. */
+export type EditTarget = 'pixels' | 'mask';
 
 export type ToolName =
   | 'move'

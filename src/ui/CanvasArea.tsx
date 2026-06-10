@@ -1,7 +1,7 @@
 import Konva from 'konva';
 import { useEffect, useRef, useState } from 'react';
 import { Image as KonvaImage, Layer as KonvaLayer, Rect, Stage } from 'react-konva';
-import { cloneLayerImageData, restoreLayerImageData } from '../engine/layer';
+import { cloneCanvasImageData, compositeLayerWithMask, restoreCanvasImageData } from '../engine/layer';
 import { BLEND_MODE_TO_COMPOSITE } from '../engine/types';
 import { useEditorStore } from '../store/editorStore';
 import { useHistoryStore } from '../store/historyStore';
@@ -16,6 +16,7 @@ export function CanvasArea() {
   const height = useEditorStore((s) => s.height);
   const layers = useEditorStore((s) => s.layers);
   const activeLayerId = useEditorStore((s) => s.activeLayerId);
+  const activeEditTarget = useEditorStore((s) => s.activeEditTarget);
   const activeTool = useEditorStore((s) => s.activeTool);
   const brushSize = useEditorStore((s) => s.brushSize);
   const brushHardness = useEditorStore((s) => s.brushHardness);
@@ -29,6 +30,7 @@ export function CanvasArea() {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const imageRefs = useRef<Map<string, Konva.Image>>(new Map());
+  const compositeCanvases = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const beforeSnapshot = useRef<ImageData | null>(null);
   const isPainting = useRef(false);
   const hasCentered = useRef(false);
@@ -93,9 +95,41 @@ export function CanvasArea() {
     return pos ?? null;
   }
 
+  /** Returns the canvas Konva should draw for a layer (composited with its mask, if any). */
+  function getDisplayCanvas(layer: (typeof layers)[number]): HTMLCanvasElement {
+    if (!layer.mask) return layer.canvas;
+    let composite = compositeCanvases.current.get(layer.id);
+    if (!composite) {
+      composite = document.createElement('canvas');
+      compositeCanvases.current.set(layer.id, composite);
+    }
+    return composite;
+  }
+
+  function updateComposites() {
+    for (const layer of layers) {
+      if (layer.mask) {
+        compositeLayerWithMask(layer, getDisplayCanvas(layer));
+      }
+    }
+  }
+
+  // Recompute mask composites whenever the layer list changes (add/remove/mask toggle).
+  useEffect(() => {
+    updateComposites();
+    stageRef.current?.batchDraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layers]);
+
   function redrawCanvas() {
+    updateComposites();
     requestRedraw();
     stageRef.current?.batchDraw();
+  }
+
+  /** Returns the pixel buffer that drawing tools should paint onto for a layer. */
+  function getEditTarget(layer: (typeof layers)[number]): HTMLCanvasElement | null {
+    return activeEditTarget === 'mask' ? layer.mask : layer.canvas;
   }
 
   const isPanning = activeTool === 'hand' || spacePressed;
@@ -107,12 +141,14 @@ export function CanvasArea() {
     if (!tool) return;
     const layer = layers.find((l) => l.id === activeLayerId);
     if (!layer || layer.locked || !layer.visible) return;
+    const target = getEditTarget(layer);
+    if (!target) return;
     const point = getRelativePoint();
     if (!point) return;
 
     isPainting.current = true;
-    beforeSnapshot.current = cloneLayerImageData(layer);
-    tool.onPointerDown({ layer, point, brushSize, brushHardness, brushColor });
+    beforeSnapshot.current = cloneCanvasImageData(target);
+    tool.onPointerDown({ layer, target, point, brushSize, brushHardness, brushColor });
     redrawCanvas();
   }
 
@@ -122,10 +158,12 @@ export function CanvasArea() {
     if (!tool) return;
     const layer = layers.find((l) => l.id === activeLayerId);
     if (!layer) return;
+    const target = getEditTarget(layer);
+    if (!target) return;
     const point = getRelativePoint();
     if (!point) return;
 
-    tool.onPointerMove({ layer, point, brushSize, brushHardness, brushColor });
+    tool.onPointerMove({ layer, target, point, brushSize, brushHardness, brushColor });
     redrawCanvas();
   }
 
@@ -133,29 +171,33 @@ export function CanvasArea() {
     if (!isPainting.current) return;
     const tool = activeDrawingTool;
     const layer = layers.find((l) => l.id === activeLayerId);
+    const target = layer ? getEditTarget(layer) : null;
     isPainting.current = false;
 
-    if (tool && layer) {
-      tool.onPointerUp({ layer, point: { x: 0, y: 0 }, brushSize, brushHardness, brushColor });
+    if (tool && layer && target) {
+      tool.onPointerUp({ layer, target, point: { x: 0, y: 0 }, brushSize, brushHardness, brushColor });
     }
 
-    if (layer && beforeSnapshot.current) {
+    if (layer && target && beforeSnapshot.current) {
       const before = beforeSnapshot.current;
-      const after = cloneLayerImageData(layer);
+      const after = cloneCanvasImageData(target);
       const layerId = layer.id;
+      const editTarget = activeEditTarget;
 
       push({
         label: activeTool === 'eraser' ? 'Erase' : 'Brush Stroke',
         undo: () => {
           const target = useEditorStore.getState().layers.find((l) => l.id === layerId);
-          if (!target) return;
-          restoreLayerImageData(target, before);
+          const canvas = editTarget === 'mask' ? target?.mask : target?.canvas;
+          if (!canvas) return;
+          restoreCanvasImageData(canvas, before);
           redrawCanvas();
         },
         redo: () => {
           const target = useEditorStore.getState().layers.find((l) => l.id === layerId);
-          if (!target) return;
-          restoreLayerImageData(target, after);
+          const canvas = editTarget === 'mask' ? target?.mask : target?.canvas;
+          if (!canvas) return;
+          restoreCanvasImageData(canvas, after);
           redrawCanvas();
         },
       });
@@ -253,7 +295,7 @@ export function CanvasArea() {
                       if (node) imageRefs.current.set(layer.id, node);
                       else imageRefs.current.delete(layer.id);
                     }}
-                    image={layer.canvas}
+                    image={getDisplayCanvas(layer)}
                     x={0}
                     y={0}
                     width={width}

@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react';
+import { useMemo, useState } from 'react';
+import type { BlendMode } from '../engine/types';
 import { useEditorStore } from '../store/editorStore';
 import { useHistoryStore } from '../store/historyStore';
 import { Icon, ICONS } from './icons';
+
+const BLEND_MODES: BlendMode[] = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten'];
 
 function PanelSection({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -78,22 +82,157 @@ function PropertiesPanel() {
   );
 }
 
+function LayerPropertiesPanel() {
+  const layers = useEditorStore((s) => s.layers);
+  const activeLayerId = useEditorStore((s) => s.activeLayerId);
+  const renameLayer = useEditorStore((s) => s.renameLayer);
+  const setLayerOpacity = useEditorStore((s) => s.setLayerOpacity);
+  const setLayerBlendMode = useEditorStore((s) => s.setLayerBlendMode);
+
+  const layer = layers.find((l) => l.id === activeLayerId);
+  if (!layer) return null;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1 text-xs text-zinc-400">
+        <span>Name</span>
+        <input
+          type="text"
+          value={layer.name}
+          onChange={(e) => renameLayer(layer.id, e.target.value)}
+          className="rounded border border-black/40 bg-black/30 px-2 py-1 text-zinc-200 focus:outline-none focus:ring-1 focus:ring-[#7c5cff]"
+        />
+      </label>
+
+      <label className="flex flex-col gap-1 text-xs text-zinc-400">
+        <span className="flex justify-between">
+          Opacity
+          <span className="mono text-zinc-300">{Math.round(layer.opacity * 100)}%</span>
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(layer.opacity * 100)}
+          onChange={(e) => setLayerOpacity(layer.id, Number(e.target.value) / 100)}
+          className="accent-[#7c5cff]"
+        />
+      </label>
+
+      <label className="flex flex-col gap-1 text-xs text-zinc-400">
+        <span>Blend Mode</span>
+        <select
+          value={layer.blendMode}
+          onChange={(e) => setLayerBlendMode(layer.id, e.target.value as BlendMode)}
+          className="rounded border border-black/40 bg-black/30 px-2 py-1 text-zinc-200 capitalize focus:outline-none focus:ring-1 focus:ring-[#7c5cff]"
+        >
+          {BLEND_MODES.map((mode) => (
+            <option key={mode} value={mode} className="capitalize">
+              {mode}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function CanvasThumbnail({
+  canvas,
+  refreshKey,
+}: {
+  canvas: HTMLCanvasElement;
+  refreshKey: number;
+}) {
+  const url = useMemo(() => canvas.toDataURL(), [canvas, refreshKey]);
+  return <img src={url} alt="" className="h-full w-full object-contain" />;
+}
+
 function LayersPanel() {
   const layers = useEditorStore((s) => s.layers);
   const activeLayerId = useEditorStore((s) => s.activeLayerId);
+  const activeEditTarget = useEditorStore((s) => s.activeEditTarget);
+  const redrawTick = useEditorStore((s) => s.redrawTick);
+  const selectLayer = useEditorStore((s) => s.selectLayer);
+  const setActiveEditTarget = useEditorStore((s) => s.setActiveEditTarget);
   const toggleLayerVisibility = useEditorStore((s) => s.toggleLayerVisibility);
+  const toggleLayerLock = useEditorStore((s) => s.toggleLayerLock);
+  const renameLayer = useEditorStore((s) => s.renameLayer);
+  const addLayer = useEditorStore((s) => s.addLayer);
+  const duplicateLayer = useEditorStore((s) => s.duplicateLayer);
+  const deleteLayer = useEditorStore((s) => s.deleteLayer);
+  const reorderLayer = useEditorStore((s) => s.reorderLayer);
+  const addLayerMask = useEditorStore((s) => s.addLayerMask);
+  const removeLayerMask = useEditorStore((s) => s.removeLayerMask);
+
+  const pastLength = useHistoryStore((s) => s.past.length);
+  const futureLength = useHistoryStore((s) => s.future.length);
+  const refreshKey = pastLength + futureLength + redrawTick;
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [dragDisplayIndex, setDragDisplayIndex] = useState<number | null>(null);
+  const [dragOverDisplayIndex, setDragOverDisplayIndex] = useState<number | null>(null);
+
+  const activeLayer = layers.find((l) => l.id === activeLayerId);
+  const displayLayers = [...layers].reverse();
+
+  function startRename(layerId: string, currentName: string) {
+    setEditingId(layerId);
+    setEditingName(currentName);
+  }
+
+  function commitRename(layerId: string) {
+    const name = editingName.trim();
+    if (name) renameLayer(layerId, name);
+    setEditingId(null);
+  }
+
+  function handleDrop(displayIndex: number) {
+    if (dragDisplayIndex === null) return;
+    const fromIndex = layers.length - 1 - dragDisplayIndex;
+    const toIndex = layers.length - 1 - displayIndex;
+    reorderLayer(fromIndex, toIndex);
+    setDragDisplayIndex(null);
+    setDragOverDisplayIndex(null);
+  }
 
   return (
     <div className="flex flex-col gap-1">
-      {[...layers].reverse().map((layer) => {
+      {displayLayers.map((layer, displayIndex) => {
         const isActive = layer.id === activeLayerId;
+        const isEditing = editingId === layer.id;
+        const isDragging = dragDisplayIndex === displayIndex;
+        const isDragOver = dragOverDisplayIndex === displayIndex && dragDisplayIndex !== displayIndex;
+
         return (
           <div
             key={layer.id}
-            className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm ${
+            draggable={!isEditing}
+            onDragStart={() => setDragDisplayIndex(displayIndex)}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOverDisplayIndex(displayIndex);
+            }}
+            onDragLeave={() => {
+              setDragOverDisplayIndex((current) => (current === displayIndex ? null : current));
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              handleDrop(displayIndex);
+            }}
+            onDragEnd={() => {
+              setDragDisplayIndex(null);
+              setDragOverDisplayIndex(null);
+            }}
+            className={`flex items-center gap-1.5 rounded-md px-1.5 py-1.5 text-sm transition-colors ${
               isActive ? 'bg-[#7c5cff]/15 ring-1 ring-[#7c5cff]/50' : 'hover:bg-white/5'
-            }`}
+            } ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'ring-1 ring-[#7c5cff] ring-dashed' : ''}`}
           >
+            <span className="cursor-grab text-zinc-600 hover:text-zinc-400 active:cursor-grabbing">
+              <Icon path={ICONS.grip} />
+            </span>
+
             <button
               type="button"
               title={layer.visible ? 'Hide layer' : 'Show layer'}
@@ -102,11 +241,69 @@ function LayersPanel() {
             >
               <Icon path={layer.visible ? ICONS.eye : ICONS.eyeOff} />
             </button>
-            <div className="h-9 w-12 shrink-0 overflow-hidden rounded border border-black/40 bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:8px_8px]">
-              <CanvasThumbnail canvas={layer.canvas} />
-            </div>
-            <span className="flex-1 truncate text-zinc-200">{layer.name}</span>
-            {layer.locked && <Icon path={ICONS.lock} className="text-zinc-500" />}
+
+            <button
+              type="button"
+              title="Layer pixels"
+              onClick={() => selectLayer(layer.id)}
+              className={`h-9 w-12 shrink-0 overflow-hidden rounded border bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:8px_8px] ${
+                isActive && activeEditTarget === 'pixels'
+                  ? 'border-[#7c5cff]'
+                  : 'border-black/40'
+              }`}
+            >
+              <CanvasThumbnail canvas={layer.canvas} refreshKey={refreshKey} />
+            </button>
+
+            {layer.mask && (
+              <button
+                type="button"
+                title="Layer mask"
+                onClick={() => {
+                  selectLayer(layer.id);
+                  setActiveEditTarget('mask');
+                }}
+                className={`h-9 w-9 shrink-0 overflow-hidden rounded border bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:8px_8px] ${
+                  isActive && activeEditTarget === 'mask'
+                    ? 'border-[#7c5cff]'
+                    : 'border-black/40'
+                }`}
+              >
+                <CanvasThumbnail canvas={layer.mask} refreshKey={refreshKey} />
+              </button>
+            )}
+
+            {isEditing ? (
+              <input
+                autoFocus
+                type="text"
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                onBlur={() => commitRename(layer.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename(layer.id);
+                  else if (e.key === 'Escape') setEditingId(null);
+                }}
+                className="flex-1 min-w-0 rounded border border-[#7c5cff]/50 bg-black/30 px-1 py-0.5 text-zinc-200 focus:outline-none"
+              />
+            ) : (
+              <span
+                className="flex-1 min-w-0 truncate text-zinc-200"
+                onDoubleClick={() => startRename(layer.id, layer.name)}
+                title={layer.name}
+              >
+                {layer.name}
+              </span>
+            )}
+
+            <button
+              type="button"
+              title={layer.locked ? 'Unlock layer' : 'Lock layer'}
+              onClick={() => toggleLayerLock(layer.id)}
+              className={`shrink-0 ${layer.locked ? 'text-zinc-300' : 'text-zinc-600 hover:text-zinc-300'}`}
+            >
+              <Icon path={layer.locked ? ICONS.lock : ICONS.unlock} />
+            </button>
           </div>
         );
       })}
@@ -114,36 +311,47 @@ function LayersPanel() {
       <div className="mt-2 flex items-center gap-1 text-zinc-500">
         <button
           type="button"
-          title="Add layer (coming in Phase 2)"
-          disabled
-          className="flex h-7 w-7 items-center justify-center rounded hover:bg-white/5 disabled:opacity-30"
+          title="Add layer"
+          onClick={() => addLayer()}
+          className="flex h-7 w-7 items-center justify-center rounded hover:bg-white/5 hover:text-white"
         >
           <Icon path={ICONS.plus} />
         </button>
         <button
           type="button"
-          title="Duplicate layer (coming in Phase 2)"
-          disabled
-          className="flex h-7 w-7 items-center justify-center rounded hover:bg-white/5 disabled:opacity-30"
+          title="Duplicate layer"
+          onClick={() => activeLayer && duplicateLayer(activeLayer.id)}
+          disabled={!activeLayer}
+          className="flex h-7 w-7 items-center justify-center rounded hover:bg-white/5 hover:text-white disabled:opacity-30"
         >
           <Icon path={ICONS.duplicate} />
         </button>
         <button
           type="button"
-          title="Delete layer (coming in Phase 2)"
-          disabled
-          className="flex h-7 w-7 items-center justify-center rounded hover:bg-white/5 disabled:opacity-30"
+          title="Delete layer"
+          onClick={() => activeLayer && deleteLayer(activeLayer.id)}
+          disabled={!activeLayer || layers.length <= 1}
+          className="flex h-7 w-7 items-center justify-center rounded hover:bg-white/5 hover:text-white disabled:opacity-30"
         >
           <Icon path={ICONS.trash} />
+        </button>
+        <button
+          type="button"
+          title={activeLayer?.mask ? 'Remove layer mask' : 'Add layer mask'}
+          onClick={() =>
+            activeLayer &&
+            (activeLayer.mask ? removeLayerMask(activeLayer.id) : addLayerMask(activeLayer.id))
+          }
+          disabled={!activeLayer}
+          className={`flex h-7 w-7 items-center justify-center rounded hover:bg-white/5 disabled:opacity-30 ${
+            activeLayer?.mask ? 'text-[#7c5cff]' : 'hover:text-white'
+          }`}
+        >
+          <Icon path={ICONS.mask} />
         </button>
       </div>
     </div>
   );
-}
-
-function CanvasThumbnail({ canvas }: { canvas: HTMLCanvasElement }) {
-  const url = canvas.toDataURL();
-  return <img src={url} alt="" className="h-full w-full object-contain" />;
 }
 
 function HistoryPanel() {
@@ -179,6 +387,9 @@ export function RightPanel() {
     <aside className="w-64 shrink-0 overflow-y-auto bg-[#18181b] border-l border-black/40 flex flex-col">
       <PanelSection title="Properties">
         <PropertiesPanel />
+      </PanelSection>
+      <PanelSection title="Layer">
+        <LayerPropertiesPanel />
       </PanelSection>
       <PanelSection title="Layers">
         <LayersPanel />
