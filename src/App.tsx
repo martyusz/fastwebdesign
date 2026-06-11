@@ -44,6 +44,24 @@ function App() {
         return;
       }
 
+      if ((e.ctrlKey || e.metaKey) && key === 'a') {
+        e.preventDefault();
+        useEditorStore.getState().selectAll();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'i') {
+        e.preventDefault();
+        useEditorStore.getState().invertSelection();
+        return;
+      }
+
+      if (key === 'q' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        useEditorStore.getState().toggleQuickMask();
+        return;
+      }
+
       if (key === 'escape') {
         const state = useEditorStore.getState();
         if (state.documentDialog) state.cancelDocumentDialog();

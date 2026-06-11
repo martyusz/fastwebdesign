@@ -26,6 +26,18 @@ const ICON_PATHS: Record<ToolName, ReactNode> = {
   marquee: (
     <rect x="3" y="3" width="18" height="18" rx="1" strokeDasharray="3 3" />
   ),
+  magicwand: (
+    <>
+      <path d="M4 20l9-9" />
+      <path d="M14 4v3M14 14v3M9 9l2 2M19 6l-2 2M19.5 11h-3M21 4l-1.5 1.5" />
+    </>
+  ),
+  colorrange: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <rect x="2.5" y="2.5" width="19" height="19" rx="1" strokeDasharray="2 2" />
+    </>
+  ),
   lasso: (
     <path d="M5 8c0-3 3-5 7-5s7 2 7 5-3 5-7 5c-1.5 0-2.8-.3-3.8-.8L6 16l1.5-3.2C5.6 11.7 5 10 5 8z" />
   ),

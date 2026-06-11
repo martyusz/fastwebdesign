@@ -64,6 +64,8 @@ function PropertiesPanel() {
 
   const selection = useEditorStore((s) => s.selection);
   const clearSelection = useEditorStore((s) => s.clearSelection);
+  const selectionTolerance = useEditorStore((s) => s.selectionTolerance);
+  const setSelectionTolerance = useEditorStore((s) => s.setSelectionTolerance);
 
   const flipActiveLayer = useEditorStore((s) => s.flipActiveLayer);
   const rotateActiveLayer = useEditorStore((s) => s.rotateActiveLayer);
@@ -245,6 +247,33 @@ function PropertiesPanel() {
             Rotate 90° CCW
           </button>
         </div>
+      </div>
+    );
+  }
+
+  if (activeTool === 'magicwand' || activeTool === 'colorrange') {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-xs text-zinc-500">
+          {activeTool === 'magicwand'
+            ? 'Click to select connected pixels of similar color.'
+            : 'Click to select all pixels of similar color across the layer.'}
+        </p>
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          <span className="flex justify-between">
+            Tolerance
+            <span className="mono text-zinc-300">{selectionTolerance}%</span>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={selectionTolerance}
+            onChange={(e) => setSelectionTolerance(Number(e.target.value))}
+            className="accent-[#7c5cff]"
+          />
+        </label>
+        {selectionInfo ?? <p className="text-xs text-zinc-600">No active selection.</p>}
       </div>
     );
   }
@@ -558,6 +587,82 @@ function LayersPanel() {
   );
 }
 
+function SelectionPanel() {
+  const selection = useEditorStore((s) => s.selection);
+  const clearSelection = useEditorStore((s) => s.clearSelection);
+  const selectAll = useEditorStore((s) => s.selectAll);
+  const invertSelection = useEditorStore((s) => s.invertSelection);
+  const featherSelection = useEditorStore((s) => s.featherSelection);
+  const expandSelection = useEditorStore((s) => s.expandSelection);
+  const contractSelection = useEditorStore((s) => s.contractSelection);
+  const smoothSelection = useEditorStore((s) => s.smoothSelection);
+  const selectionToLayerMask = useEditorStore((s) => s.selectionToLayerMask);
+  const quickMaskMode = useEditorStore((s) => s.quickMaskMode);
+  const toggleQuickMask = useEditorStore((s) => s.toggleQuickMask);
+
+  const [amount, setAmount] = useState(5);
+
+  const buttonClass =
+    'rounded border border-black/40 bg-black/20 px-2 py-1.5 text-xs text-zinc-300 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-30 disabled:hover:bg-black/20 disabled:hover:text-zinc-300';
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-1.5">
+        <button type="button" className={buttonClass} onClick={() => selectAll()}>
+          Select All
+        </button>
+        <button type="button" className={buttonClass} onClick={() => clearSelection()} disabled={!selection}>
+          Deselect
+        </button>
+        <button type="button" className={buttonClass} onClick={() => invertSelection()}>
+          Invert
+        </button>
+        <button
+          type="button"
+          className={`${buttonClass} ${quickMaskMode ? 'bg-[#7c5cff]/20 text-white border-[#7c5cff]/50' : ''}`}
+          onClick={() => toggleQuickMask()}
+        >
+          Quick Mask (Q)
+        </button>
+      </div>
+
+      <label className="flex flex-col gap-1 text-xs text-zinc-400">
+        <span className="flex justify-between">
+          Amount
+          <span className="mono text-zinc-300">{amount}px</span>
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={amount}
+          onChange={(e) => setAmount(Number(e.target.value))}
+          className="accent-[#7c5cff]"
+        />
+      </label>
+
+      <div className="grid grid-cols-2 gap-1.5">
+        <button type="button" className={buttonClass} disabled={!selection} onClick={() => featherSelection(amount)}>
+          Feather
+        </button>
+        <button type="button" className={buttonClass} disabled={!selection} onClick={() => smoothSelection(amount)}>
+          Smooth
+        </button>
+        <button type="button" className={buttonClass} disabled={!selection} onClick={() => expandSelection(amount)}>
+          Expand
+        </button>
+        <button type="button" className={buttonClass} disabled={!selection} onClick={() => contractSelection(amount)}>
+          Contract
+        </button>
+      </div>
+
+      <button type="button" className={buttonClass} disabled={!selection} onClick={() => selectionToLayerMask()}>
+        Selection → Layer Mask
+      </button>
+    </div>
+  );
+}
+
 function HistoryPanel() {
   const past = useHistoryStore((s) => s.past);
   const future = useHistoryStore((s) => s.future);
@@ -591,6 +696,9 @@ export function RightPanel() {
     <aside className="w-64 shrink-0 overflow-y-auto bg-[#18181b] border-l border-black/40 flex flex-col">
       <PanelSection title="Properties">
         <PropertiesPanel />
+      </PanelSection>
+      <PanelSection title="Selection">
+        <SelectionPanel />
       </PanelSection>
       <PanelSection title="Layer">
         <LayerPropertiesPanel />

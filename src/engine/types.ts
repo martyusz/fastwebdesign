@@ -36,13 +36,17 @@ export interface Point {
   y: number;
 }
 
-/** A polygon-based selection (rectangular marquee selections are 4-point polygons). */
+/** A polygon- or raster-based selection. */
 export interface SelectionState {
-  kind: 'rect' | 'lasso';
-  /** Polygon points in document/canvas coordinates. */
+  kind: 'rect' | 'lasso' | 'mask';
+  /** Polygon points in document/canvas coordinates (unused for 'mask'). */
   points: Point[];
-  /** Axis-aligned bounding box of the polygon. */
+  /** Axis-aligned bounding box of the selected area. */
   bounds: { x: number; y: number; width: number; height: number };
+  /** For kind 'mask': a full-document-size grayscale canvas whose alpha channel is the selection strength (255 = fully selected). */
+  mask?: HTMLCanvasElement;
+  /** For kind 'mask': traced outline loops (in document pixel coordinates) for marching-ants rendering. */
+  contours?: Point[][];
 }
 
 /** Live preview shown while a drag-based tool is in progress. */
@@ -61,6 +65,8 @@ export type ToolName =
   | 'move'
   | 'marquee'
   | 'lasso'
+  | 'magicwand'
+  | 'colorrange'
   | 'brush'
   | 'eraser'
   | 'pencil'

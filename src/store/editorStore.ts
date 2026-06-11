@@ -13,7 +13,20 @@ import {
   rotateCanvas90,
   scaleCanvas,
 } from '../engine/layer';
-import { clipToSelection } from '../engine/selection';
+import {
+  clipToSelection,
+  colorRangeMask,
+  contractMask,
+  createEmptyMask,
+  createFullMask,
+  expandMask,
+  featherMask,
+  invertMask,
+  magicWandMask,
+  maskToSelection,
+  selectionToMask,
+  smoothMask,
+} from '../engine/selection';
 import { getFilter } from '../filters';
 import { SOCIAL_PRESETS, type SocialPreset } from '../presets';
 import type {
@@ -80,10 +93,32 @@ interface EditorState {
   addLayerMask: (layerId: string) => void;
   removeLayerMask: (layerId: string) => void;
 
-  /** Active marquee/lasso selection that paint operations are clipped to. */
+  /** Active selection that paint operations are clipped to. */
   selection: SelectionState | null;
   setSelection: (selection: SelectionState | null) => void;
   clearSelection: () => void;
+
+  /** Tolerance (0-100) for the magic wand and color range tools. */
+  selectionTolerance: number;
+  setSelectionTolerance: (value: number) => void;
+  /** Flood-selects pixels similar in color to the one under `point`, on the active layer. */
+  magicWandSelect: (point: Point) => void;
+  /** Selects every pixel on the active layer similar in color to the one under `point`. */
+  colorRangeSelect: (point: Point) => void;
+
+  selectAll: () => void;
+  invertSelection: () => void;
+  featherSelection: (px: number) => void;
+  expandSelection: (px: number) => void;
+  contractSelection: (px: number) => void;
+  smoothSelection: (px: number) => void;
+  /** Replaces the active layer's mask with the current selection (or clears it if nothing is selected). */
+  selectionToLayerMask: () => void;
+
+  /** Quick Mask mode: paints the selection as a red overlay instead of marching ants. */
+  quickMaskMode: boolean;
+  quickMaskCanvas: HTMLCanvasElement | null;
+  toggleQuickMask: () => void;
 
   /** Live preview shown while a drag-based tool (shape, gradient, marquee, lasso, crop) is active. */
   toolPreview: ToolPreview | null;
@@ -378,6 +413,120 @@ export const useEditorStore = create<EditorState>((set, get) => {
     selection: null,
     setSelection: (selection) => set({ selection }),
     clearSelection: () => set({ selection: null }),
+
+    selectionTolerance: 32,
+    setSelectionTolerance: (value) => set({ selectionTolerance: Math.max(0, Math.min(100, value)) }),
+
+    magicWandSelect: (point) => {
+      const state = get();
+      const layer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (!layer) return;
+      const target = state.activeEditTarget === 'mask' ? layer.mask : layer.canvas;
+      if (!target) return;
+      const mask = magicWandMask(target, point.x, point.y, state.selectionTolerance);
+      set({ selection: mask ? maskToSelection(mask) : null });
+    },
+
+    colorRangeSelect: (point) => {
+      const state = get();
+      const layer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (!layer) return;
+      const target = state.activeEditTarget === 'mask' ? layer.mask : layer.canvas;
+      if (!target) return;
+      const x = Math.floor(point.x);
+      const y = Math.floor(point.y);
+      if (x < 0 || y < 0 || x >= target.width || y >= target.height) return;
+      const [r, g, b, a] = target.getContext('2d')!.getImageData(x, y, 1, 1).data;
+      const mask = colorRangeMask(target, [r, g, b, a], state.selectionTolerance);
+      set({ selection: maskToSelection(mask) });
+    },
+
+    selectAll: () => {
+      const state = get();
+      set({ selection: maskToSelection(createFullMask(state.width, state.height)) });
+    },
+
+    invertSelection: () => {
+      const state = get();
+      const mask = selectionToMask(state.selection, state.width, state.height);
+      set({ selection: maskToSelection(invertMask(mask)) });
+    },
+
+    featherSelection: (px) => {
+      const state = get();
+      if (!state.selection || px <= 0) return;
+      const mask = selectionToMask(state.selection, state.width, state.height);
+      set({ selection: maskToSelection(featherMask(mask, px)) });
+    },
+
+    expandSelection: (px) => {
+      const state = get();
+      if (!state.selection || px <= 0) return;
+      const mask = selectionToMask(state.selection, state.width, state.height);
+      set({ selection: maskToSelection(expandMask(mask, px)) });
+    },
+
+    contractSelection: (px) => {
+      const state = get();
+      if (!state.selection || px <= 0) return;
+      const mask = selectionToMask(state.selection, state.width, state.height);
+      set({ selection: maskToSelection(contractMask(mask, px)) });
+    },
+
+    smoothSelection: (px) => {
+      const state = get();
+      if (!state.selection || px <= 0) return;
+      const mask = selectionToMask(state.selection, state.width, state.height);
+      set({ selection: maskToSelection(smoothMask(mask, px)) });
+    },
+
+    selectionToLayerMask: () => {
+      const state = get();
+      const layer = state.layers.find((l) => l.id === state.activeLayerId);
+      if (!layer) return;
+
+      const before = layer.mask;
+      const after = selectionToMask(state.selection, state.width, state.height);
+      const layerId = layer.id;
+
+      set((s) => ({
+        layers: s.layers.map((l) => (l.id === layerId ? { ...l, mask: after } : l)),
+        selection: null,
+      }));
+      get().requestRedraw();
+
+      useHistoryStore.getState().push({
+        label: 'Selection to Layer Mask',
+        undo: () => {
+          useEditorStore.setState((s) => ({
+            layers: s.layers.map((l) => (l.id === layerId ? { ...l, mask: before } : l)),
+          }));
+          useEditorStore.getState().requestRedraw();
+        },
+        redo: () => {
+          useEditorStore.setState((s) => ({
+            layers: s.layers.map((l) => (l.id === layerId ? { ...l, mask: after } : l)),
+          }));
+          useEditorStore.getState().requestRedraw();
+        },
+      });
+    },
+
+    quickMaskMode: false,
+    quickMaskCanvas: null,
+    toggleQuickMask: () => {
+      const state = get();
+      if (state.quickMaskMode) {
+        const mask = state.quickMaskCanvas;
+        set({ quickMaskMode: false, quickMaskCanvas: null, selection: mask ? maskToSelection(mask) : null });
+      } else {
+        const mask = state.selection
+          ? selectionToMask(state.selection, state.width, state.height)
+          : createEmptyMask(state.width, state.height);
+        set({ quickMaskMode: true, quickMaskCanvas: mask, selection: null });
+      }
+      get().requestRedraw();
+    },
 
     toolPreview: null,
     setToolPreview: (preview) => set({ toolPreview: preview }),

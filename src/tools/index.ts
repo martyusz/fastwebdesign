@@ -22,7 +22,7 @@ export const drawingTools: Partial<Record<ToolName, DrawingTool>> = {
 };
 
 /** Tools handled with bespoke pointer logic in CanvasArea rather than the drawingTools registry. */
-export const SPECIAL_TOOLS: ToolName[] = ['marquee', 'lasso', 'eyedropper', 'text', 'crop'];
+export const SPECIAL_TOOLS: ToolName[] = ['marquee', 'lasso', 'magicwand', 'colorrange', 'eyedropper', 'text', 'crop'];
 
 export interface ToolDefinition {
   name: ToolName;
@@ -37,6 +37,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   { name: 'move', label: 'Move', shortcut: 'V', group: 0 },
   { name: 'marquee', label: 'Marquee', shortcut: 'M', group: 0 },
   { name: 'lasso', label: 'Lasso', shortcut: 'L', group: 0 },
+  { name: 'magicwand', label: 'Magic Wand', shortcut: 'W', group: 0 },
+  { name: 'colorrange', label: 'Color Range', shortcut: 'D', group: 0 },
 
   { name: 'brush', label: 'Brush', shortcut: 'B', group: 1 },
   { name: 'eraser', label: 'Eraser', shortcut: 'E', group: 1 },

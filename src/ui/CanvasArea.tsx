@@ -1,5 +1,5 @@
 import Konva from 'konva';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Ellipse, Image as KonvaImage, Layer as KonvaLayer, Line, Rect, Stage } from 'react-konva';
 import {
   cloneCanvasImageData,
@@ -46,6 +46,10 @@ export function CanvasArea() {
   const setSelection = useEditorStore((s) => s.setSelection);
   const toolPreview = useEditorStore((s) => s.toolPreview);
   const setToolPreview = useEditorStore((s) => s.setToolPreview);
+  const magicWandSelect = useEditorStore((s) => s.magicWandSelect);
+  const colorRangeSelect = useEditorStore((s) => s.colorRangeSelect);
+  const quickMaskMode = useEditorStore((s) => s.quickMaskMode);
+  const quickMaskCanvas = useEditorStore((s) => s.quickMaskCanvas);
 
   const fontFamily = useEditorStore((s) => s.fontFamily);
   const fontSize = useEditorStore((s) => s.fontSize);
@@ -70,6 +74,7 @@ export function CanvasArea() {
   const stageRef = useRef<Konva.Stage>(null);
   const imageRefs = useRef<Map<string, Konva.Image>>(new Map());
   const compositeCanvases = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  const quickMaskDisplayRef = useRef<HTMLCanvasElement | null>(null);
   const beforeSnapshot = useRef<ImageData | null>(null);
   const isPainting = useRef(false);
   const hasCentered = useRef(false);
@@ -186,7 +191,28 @@ export function CanvasArea() {
 
   /** Returns the pixel buffer that drawing tools should paint onto for a layer. */
   function getEditTarget(layer: (typeof layers)[number]): HTMLCanvasElement | null {
+    if (quickMaskMode) return quickMaskCanvas;
     return activeEditTarget === 'mask' ? layer.mask : layer.canvas;
+  }
+
+  /** Renders the quick mask buffer tinted red, for the Quick Mask overlay. */
+  function getQuickMaskDisplay(): HTMLCanvasElement | null {
+    if (!quickMaskCanvas) return null;
+    let display = quickMaskDisplayRef.current;
+    if (!display) {
+      display = document.createElement('canvas');
+      quickMaskDisplayRef.current = display;
+    }
+    display.width = quickMaskCanvas.width;
+    display.height = quickMaskCanvas.height;
+    const ctx = display.getContext('2d')!;
+    ctx.clearRect(0, 0, display.width, display.height);
+    ctx.fillStyle = '#ff3b30';
+    ctx.fillRect(0, 0, display.width, display.height);
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(quickMaskCanvas, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    return display;
   }
 
   const isPanning = activeTool === 'hand' || spacePressed;
@@ -239,6 +265,16 @@ export function CanvasArea() {
       return;
     }
 
+    if (activeTool === 'magicwand' && !quickMaskMode) {
+      magicWandSelect(point);
+      return;
+    }
+
+    if (activeTool === 'colorrange' && !quickMaskMode) {
+      colorRangeSelect(point);
+      return;
+    }
+
     if (activeTool === 'marquee') {
       dragStart.current = point;
       setToolPreview({ kind: 'rect', x: point.x, y: point.y, width: 0, height: 0 });
@@ -260,13 +296,15 @@ export function CanvasArea() {
     const tool = activeDrawingTool;
     if (!tool) return;
     const layer = layers.find((l) => l.id === activeLayerId);
-    if (!layer || layer.locked || !layer.visible) return;
+    if (!layer) return;
+    if (!quickMaskMode && (layer.locked || !layer.visible)) return;
     const target = getEditTarget(layer);
     if (!target) return;
 
     isPainting.current = true;
     beforeSnapshot.current = cloneCanvasImageData(target);
-    tool.onPointerDown({ layer, target, point, brushSize, brushHardness, brushColor, secondaryColor, selection });
+    const color = quickMaskMode ? '#ffffff' : brushColor;
+    tool.onPointerDown({ layer, target, point, brushSize, brushHardness, brushColor: color, secondaryColor, selection: quickMaskMode ? null : selection });
     redrawCanvas();
   }
 
@@ -310,7 +348,8 @@ export function CanvasArea() {
     const target = getEditTarget(layer);
     if (!target) return;
 
-    tool.onPointerMove({ layer, target, point, brushSize, brushHardness, brushColor, secondaryColor, selection });
+    const color = quickMaskMode ? '#ffffff' : brushColor;
+    tool.onPointerMove({ layer, target, point, brushSize, brushHardness, brushColor: color, secondaryColor, selection: quickMaskMode ? null : selection });
     redrawCanvas();
   }
 
@@ -347,11 +386,12 @@ export function CanvasArea() {
     const target = layer ? getEditTarget(layer) : null;
     isPainting.current = false;
 
+    const color = quickMaskMode ? '#ffffff' : brushColor;
     if (tool && layer && target) {
-      tool.onPointerUp({ layer, target, point, brushSize, brushHardness, brushColor, secondaryColor, selection });
+      tool.onPointerUp({ layer, target, point, brushSize, brushHardness, brushColor: color, secondaryColor, selection: quickMaskMode ? null : selection });
     }
 
-    if (layer && target && beforeSnapshot.current) {
+    if (layer && target && beforeSnapshot.current && !quickMaskMode) {
       const before = beforeSnapshot.current;
       const after = cloneCanvasImageData(target);
       const labels: Partial<Record<typeof activeTool, string>> = {
@@ -402,7 +442,7 @@ export function CanvasArea() {
   if (isPanning) cursor = 'grab';
   else if (activeTool === 'text') cursor = 'text';
   else if (activeTool === 'eyedropper') cursor = 'crosshair';
-  else if (activeDrawingTool || ['marquee', 'lasso', 'crop'].includes(activeTool)) cursor = 'crosshair';
+  else if (activeDrawingTool || ['marquee', 'lasso', 'crop', 'magicwand', 'colorrange'].includes(activeTool)) cursor = 'crosshair';
   else if (activeTool === 'zoom') cursor = 'zoom-in';
 
   const dash = [6, 4];
@@ -478,6 +518,17 @@ export function CanvasArea() {
                     globalCompositeOperation={BLEND_MODE_TO_COMPOSITE[layer.blendMode]}
                   />
                 ),
+            )}
+            {quickMaskMode && quickMaskCanvas && (
+              <KonvaImage
+                image={getQuickMaskDisplay() ?? undefined}
+                x={0}
+                y={0}
+                width={width}
+                height={height}
+                opacity={0.5}
+                listening={false}
+              />
             )}
           </KonvaLayer>
           <KonvaLayer listening={false}>
@@ -590,6 +641,27 @@ export function CanvasArea() {
                 />
               </>
             )}
+            {selection?.kind === 'mask' &&
+              selection.contours?.map((loop, i) => (
+                <Fragment key={i}>
+                  <Line
+                    points={loop.flatMap((p) => [p.x, p.y])}
+                    stroke="#000000"
+                    strokeWidth={1 / zoom}
+                    dash={dash}
+                    dashOffset={-marchOffset / zoom}
+                    closed
+                  />
+                  <Line
+                    points={loop.flatMap((p) => [p.x, p.y])}
+                    stroke="#ffffff"
+                    strokeWidth={1 / zoom}
+                    dash={dash}
+                    dashOffset={(-marchOffset + dash[0]) / zoom}
+                    closed
+                  />
+                </Fragment>
+              ))}
 
             {/* Crop overlay */}
             {cropRect && (
