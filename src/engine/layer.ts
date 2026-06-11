@@ -1,4 +1,5 @@
-import { BLEND_MODE_TO_COMPOSITE, type Layer } from './types';
+import { applyAdjustment, ADJUSTMENT_LABELS, defaultAdjustmentSettings } from './adjustments';
+import { BLEND_MODE_TO_COMPOSITE, type AdjustmentType, type Layer } from './types';
 
 let layerCounter = 0;
 
@@ -18,6 +19,26 @@ export function createLayer(width: number, height: number, name?: string): Layer
     blendMode: 'normal',
     canvas,
     mask: null,
+    adjustment: null,
+  };
+}
+
+/** Creates a non-destructive adjustment layer. Its canvas is unused (1x1 placeholder). */
+export function createAdjustmentLayer(type: AdjustmentType): Layer {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+
+  return {
+    id: crypto.randomUUID(),
+    name: ADJUSTMENT_LABELS[type],
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'normal',
+    canvas,
+    mask: null,
+    adjustment: { type, settings: defaultAdjustmentSettings(type), clipToBelow: false },
   };
 }
 
@@ -79,6 +100,9 @@ export function duplicateLayer(layer: Layer): Layer {
     name: `${layer.name} copy`,
     canvas: cloneCanvas(layer.canvas),
     mask: layer.mask ? cloneCanvas(layer.mask) : null,
+    adjustment: layer.adjustment
+      ? { ...layer.adjustment, settings: structuredClone(layer.adjustment.settings) }
+      : null,
   };
 }
 
@@ -114,29 +138,72 @@ export function compositeLayerWithMask(layer: Layer, target: HTMLCanvasElement):
   }
 }
 
-/** Flattens all visible layers (respecting mask, opacity, blend mode) into one canvas. */
+/** Applies an adjustment layer's effect to `source`, blended by the adjustment layer's opacity. */
+function applyAdjustmentBlend(source: HTMLCanvasElement, layer: Layer): HTMLCanvasElement {
+  const adjusted = applyAdjustment(source, layer.adjustment!);
+  if (layer.opacity >= 1) return adjusted;
+  const result = document.createElement('canvas');
+  result.width = source.width;
+  result.height = source.height;
+  const ctx = result.getContext('2d')!;
+  ctx.drawImage(source, 0, 0);
+  ctx.globalAlpha = Math.max(0, layer.opacity);
+  ctx.drawImage(adjusted, 0, 0);
+  return result;
+}
+
+/**
+ * Flattens all visible layers (respecting mask, opacity, blend mode) into one canvas.
+ * Adjustment layers are non-destructive: a clipped adjustment affects only the layer
+ * directly below it, while an unclipped adjustment affects the full composite so far.
+ */
 export function compositeAllLayers(layers: Layer[], width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
 
-  for (const layer of layers) {
+  for (let i = 0; i < layers.length; i++) {
+    const layer = layers[i];
+    if (layer.adjustment) continue;
     if (!layer.visible) continue;
+
     let source: HTMLCanvasElement = layer.canvas;
     if (layer.mask) {
       const masked = document.createElement('canvas');
       compositeLayerWithMask(layer, masked);
       source = masked;
     }
+
+    let j = i + 1;
+    while (j < layers.length && layers[j].adjustment?.clipToBelow) {
+      if (layers[j].visible) source = applyAdjustmentBlend(source, layers[j]);
+      j++;
+    }
+
     ctx.save();
     ctx.globalAlpha = layer.opacity;
     ctx.globalCompositeOperation = BLEND_MODE_TO_COMPOSITE[layer.blendMode];
     ctx.drawImage(source, 0, 0);
     ctx.restore();
+
+    while (j < layers.length && layers[j].adjustment && !layers[j].adjustment!.clipToBelow) {
+      if (layers[j].visible) {
+        const adjusted = applyAdjustmentBlend(canvas, layers[j]);
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(adjusted, 0, 0);
+      }
+      j++;
+    }
   }
 
   return canvas;
+}
+
+/** Composites only the layers below `layerId` (used as the input preview for an adjustment layer). */
+export function compositeLayersBelow(layers: Layer[], layerId: string, width: number, height: number): HTMLCanvasElement {
+  const index = layers.findIndex((l) => l.id === layerId);
+  return compositeAllLayers(index === -1 ? layers : layers.slice(0, index), width, height);
 }
 
 /** Returns a horizontally-flipped copy of a canvas (same dimensions). */

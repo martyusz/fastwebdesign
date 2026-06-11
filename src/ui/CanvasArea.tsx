@@ -1,5 +1,5 @@
 import Konva from 'konva';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Ellipse, Image as KonvaImage, Layer as KonvaLayer, Line, Rect, Stage } from 'react-konva';
 import {
   cloneCanvasImageData,
@@ -218,6 +218,13 @@ export function CanvasArea() {
   const isPanning = activeTool === 'hand' || spacePressed;
   const activeDrawingTool = drawingTools[activeTool];
 
+  const hasAdjustments = layers.some((l) => l.adjustment);
+  const fullComposite = useMemo(
+    () => (hasAdjustments ? compositeAllLayers(layers, width, height) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layers, redrawTick, width, height, hasAdjustments],
+  );
+
   function pushPaintCommand(layerId: string, editTarget: typeof activeEditTarget, label: string, before: ImageData, after: ImageData) {
     push({
       label,
@@ -260,7 +267,7 @@ export function CanvasArea() {
     if (activeTool === 'text') {
       if (textEditor) commitTextEditor();
       const layer = layers.find((l) => l.id === activeLayerId);
-      if (!layer || layer.locked || !layer.visible) return;
+      if (!layer || layer.adjustment || layer.locked || !layer.visible) return;
       openTextEditor(point);
       return;
     }
@@ -297,6 +304,7 @@ export function CanvasArea() {
     if (!tool) return;
     const layer = layers.find((l) => l.id === activeLayerId);
     if (!layer) return;
+    if (layer.adjustment) return;
     if (!quickMaskMode && (layer.locked || !layer.visible)) return;
     const target = getEditTarget(layer);
     if (!target) return;
@@ -500,24 +508,28 @@ export function CanvasArea() {
             />
           </KonvaLayer>
           <KonvaLayer listening={false} clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
-            {layers.map(
-              (layer) =>
-                layer.visible && (
-                  <KonvaImage
-                    key={layer.id}
-                    ref={(node) => {
-                      if (node) imageRefs.current.set(layer.id, node);
-                      else imageRefs.current.delete(layer.id);
-                    }}
-                    image={getDisplayCanvas(layer)}
-                    x={0}
-                    y={0}
-                    width={width}
-                    height={height}
-                    opacity={layer.opacity}
-                    globalCompositeOperation={BLEND_MODE_TO_COMPOSITE[layer.blendMode]}
-                  />
-                ),
+            {fullComposite ? (
+              <KonvaImage image={fullComposite} x={0} y={0} width={width} height={height} />
+            ) : (
+              layers.map(
+                (layer) =>
+                  layer.visible && (
+                    <KonvaImage
+                      key={layer.id}
+                      ref={(node) => {
+                        if (node) imageRefs.current.set(layer.id, node);
+                        else imageRefs.current.delete(layer.id);
+                      }}
+                      image={getDisplayCanvas(layer)}
+                      x={0}
+                      y={0}
+                      width={width}
+                      height={height}
+                      opacity={layer.opacity}
+                      globalCompositeOperation={BLEND_MODE_TO_COMPOSITE[layer.blendMode]}
+                    />
+                  ),
+              )
             )}
             {quickMaskMode && quickMaskCanvas && (
               <KonvaImage

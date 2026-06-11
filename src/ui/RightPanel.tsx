@@ -1,11 +1,23 @@
 import type { ReactNode } from 'react';
-import { useMemo, useState } from 'react';
-import type { BlendMode } from '../engine/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ADJUSTMENT_LABELS } from '../engine/adjustments';
+import type { AdjustmentType, BlendMode } from '../engine/types';
 import { useEditorStore } from '../store/editorStore';
 import { useHistoryStore } from '../store/historyStore';
+import { AdjustmentPanel } from './AdjustmentPanel';
 import { Icon, ICONS } from './icons';
 
 const BLEND_MODES: BlendMode[] = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten'];
+
+const ADJUSTMENT_TYPES: AdjustmentType[] = [
+  'curves',
+  'levels',
+  'brightness-contrast',
+  'hue-saturation',
+  'color-balance',
+  'exposure',
+  'vibrance',
+];
 
 function PanelSection({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -352,20 +364,22 @@ function LayerPropertiesPanel() {
         />
       </label>
 
-      <label className="flex flex-col gap-1 text-xs text-zinc-400">
-        <span>Blend Mode</span>
-        <select
-          value={layer.blendMode}
-          onChange={(e) => setLayerBlendMode(layer.id, e.target.value as BlendMode)}
-          className="rounded border border-black/40 bg-black/30 px-2 py-1 text-zinc-200 capitalize focus:outline-none focus:ring-1 focus:ring-[#7c5cff]"
-        >
-          {BLEND_MODES.map((mode) => (
-            <option key={mode} value={mode} className="capitalize">
-              {mode}
-            </option>
-          ))}
-        </select>
-      </label>
+      {!layer.adjustment && (
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          <span>Blend Mode</span>
+          <select
+            value={layer.blendMode}
+            onChange={(e) => setLayerBlendMode(layer.id, e.target.value as BlendMode)}
+            className="rounded border border-black/40 bg-black/30 px-2 py-1 text-zinc-200 capitalize focus:outline-none focus:ring-1 focus:ring-[#7c5cff]"
+          >
+            {BLEND_MODES.map((mode) => (
+              <option key={mode} value={mode} className="capitalize">
+                {mode}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
     </div>
   );
 }
@@ -397,6 +411,7 @@ function LayersPanel() {
   const reorderLayer = useEditorStore((s) => s.reorderLayer);
   const addLayerMask = useEditorStore((s) => s.addLayerMask);
   const removeLayerMask = useEditorStore((s) => s.removeLayerMask);
+  const addAdjustmentLayer = useEditorStore((s) => s.addAdjustmentLayer);
 
   const pastLength = useHistoryStore((s) => s.past.length);
   const futureLength = useHistoryStore((s) => s.future.length);
@@ -406,6 +421,19 @@ function LayersPanel() {
   const [editingName, setEditingName] = useState('');
   const [dragDisplayIndex, setDragDisplayIndex] = useState<number | null>(null);
   const [dragOverDisplayIndex, setDragOverDisplayIndex] = useState<number | null>(null);
+  const [adjustmentMenuOpen, setAdjustmentMenuOpen] = useState(false);
+  const adjustmentMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!adjustmentMenuOpen) return;
+    function onPointerDown(e: PointerEvent) {
+      if (adjustmentMenuRef.current && !adjustmentMenuRef.current.contains(e.target as Node)) {
+        setAdjustmentMenuOpen(false);
+      }
+    }
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [adjustmentMenuOpen]);
 
   const activeLayer = layers.find((l) => l.id === activeLayerId);
   const displayLayers = [...layers].reverse();
@@ -475,18 +503,31 @@ function LayersPanel() {
               <Icon path={layer.visible ? ICONS.eye : ICONS.eyeOff} />
             </button>
 
-            <button
-              type="button"
-              title="Layer pixels"
-              onClick={() => selectLayer(layer.id)}
-              className={`h-9 w-12 shrink-0 overflow-hidden rounded border bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:8px_8px] ${
-                isActive && activeEditTarget === 'pixels'
-                  ? 'border-[#7c5cff]'
-                  : 'border-black/40'
-              }`}
-            >
-              <CanvasThumbnail canvas={layer.canvas} refreshKey={refreshKey} />
-            </button>
+            {layer.adjustment ? (
+              <button
+                type="button"
+                title="Adjustment layer"
+                onClick={() => selectLayer(layer.id)}
+                className={`flex h-9 w-12 shrink-0 items-center justify-center rounded border bg-[#27272a] text-[#7c5cff] ${
+                  isActive ? 'border-[#7c5cff]' : 'border-black/40'
+                }`}
+              >
+                <Icon path={ICONS.adjustment} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                title="Layer pixels"
+                onClick={() => selectLayer(layer.id)}
+                className={`h-9 w-12 shrink-0 overflow-hidden rounded border bg-[repeating-conic-gradient(#3f3f46_0%_25%,#27272a_0%_50%)] bg-[length:8px_8px] ${
+                  isActive && activeEditTarget === 'pixels'
+                    ? 'border-[#7c5cff]'
+                    : 'border-black/40'
+                }`}
+              >
+                <CanvasThumbnail canvas={layer.canvas} refreshKey={refreshKey} />
+              </button>
+            )}
 
             {layer.mask && (
               <button
@@ -582,6 +623,39 @@ function LayersPanel() {
         >
           <Icon path={ICONS.mask} />
         </button>
+
+        <div className="relative ml-auto" ref={adjustmentMenuRef}>
+          <button
+            type="button"
+            title="Add adjustment layer"
+            onClick={() => setAdjustmentMenuOpen((open) => !open)}
+            className={`flex h-7 items-center gap-1 rounded px-1.5 hover:bg-white/5 hover:text-white ${
+              adjustmentMenuOpen ? 'text-white' : ''
+            }`}
+          >
+            <Icon path={ICONS.adjustment} />
+            <span className="text-xs">Adjustment</span>
+            <Icon path={ICONS.chevronDown} className="h-3 w-3" />
+          </button>
+
+          {adjustmentMenuOpen && (
+            <div className="absolute bottom-full right-0 z-10 mb-1 w-44 rounded-md border border-black/40 bg-[#27272a] py-1 shadow-xl">
+              {ADJUSTMENT_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => {
+                    addAdjustmentLayer(type);
+                    setAdjustmentMenuOpen(false);
+                  }}
+                  className="block w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-[#7c5cff]/15 hover:text-white"
+                >
+                  {ADJUSTMENT_LABELS[type]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -692,6 +766,10 @@ function HistoryPanel() {
 }
 
 export function RightPanel() {
+  const layers = useEditorStore((s) => s.layers);
+  const activeLayerId = useEditorStore((s) => s.activeLayerId);
+  const activeLayer = layers.find((l) => l.id === activeLayerId);
+
   return (
     <aside className="w-64 shrink-0 overflow-y-auto bg-[#18181b] border-l border-black/40 flex flex-col">
       <PanelSection title="Properties">
@@ -703,6 +781,11 @@ export function RightPanel() {
       <PanelSection title="Layer">
         <LayerPropertiesPanel />
       </PanelSection>
+      {activeLayer?.adjustment && (
+        <PanelSection title="Adjustment">
+          <AdjustmentPanel />
+        </PanelSection>
+      )}
       <PanelSection title="Layers">
         <LayersPanel />
       </PanelSection>

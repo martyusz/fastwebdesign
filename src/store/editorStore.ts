@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   cloneCanvasImageData,
   compositeAllLayers,
+  createAdjustmentLayer,
   createLayer,
   createMaskCanvas,
   duplicateLayer as cloneLayer,
@@ -30,6 +31,8 @@ import {
 import { getFilter } from '../filters';
 import { SOCIAL_PRESETS, type SocialPreset } from '../presets';
 import type {
+  AdjustmentLayerData,
+  AdjustmentType,
   BlendMode,
   EditTarget,
   FlipDirection,
@@ -92,6 +95,13 @@ interface EditorState {
 
   addLayerMask: (layerId: string) => void;
   removeLayerMask: (layerId: string) => void;
+
+  /** Inserts a non-destructive adjustment layer above the active layer. */
+  addAdjustmentLayer: (type: AdjustmentType) => void;
+  /** Merges a partial settings patch into an adjustment layer's settings, recomputing the live composite. */
+  updateAdjustmentSettings: (layerId: string, settings: Partial<AdjustmentLayerData['settings']>) => void;
+  /** Toggles whether an adjustment layer only affects the layer directly below it. */
+  setAdjustmentClip: (layerId: string, clip: boolean) => void;
 
   /** Active selection that paint operations are clipped to. */
   selection: SelectionState | null;
@@ -409,6 +419,45 @@ export const useEditorStore = create<EditorState>((set, get) => {
         activeEditTarget:
           state.activeLayerId === layerId ? 'pixels' : state.activeEditTarget,
       })),
+
+    addAdjustmentLayer: (type) => {
+      const state = get();
+      const before = { layers: state.layers, activeLayerId: state.activeLayerId };
+      const newLayer = createAdjustmentLayer(type);
+      const activeIndex = state.layers.findIndex((l) => l.id === state.activeLayerId);
+      const insertAt = activeIndex === -1 ? state.layers.length : activeIndex + 1;
+      const layers = [
+        ...state.layers.slice(0, insertAt),
+        newLayer,
+        ...state.layers.slice(insertAt),
+      ];
+      const after = { layers, activeLayerId: newLayer.id };
+      set({ ...after, activeEditTarget: 'pixels' });
+      get().requestRedraw();
+      withLayersCommand('Add Adjustment Layer', before, after);
+    },
+
+    updateAdjustmentSettings: (layerId, settings) => {
+      set((state) => ({
+        layers: state.layers.map((layer) =>
+          layer.id === layerId && layer.adjustment
+            ? { ...layer, adjustment: { ...layer.adjustment, settings: { ...layer.adjustment.settings, ...settings } } }
+            : layer,
+        ),
+      }));
+      get().requestRedraw();
+    },
+
+    setAdjustmentClip: (layerId, clip) => {
+      set((state) => ({
+        layers: state.layers.map((layer) =>
+          layer.id === layerId && layer.adjustment
+            ? { ...layer, adjustment: { ...layer.adjustment, clipToBelow: clip } }
+            : layer,
+        ),
+      }));
+      get().requestRedraw();
+    },
 
     selection: null,
     setSelection: (selection) => set({ selection }),

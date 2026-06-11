@@ -26,7 +26,86 @@ export interface Layer {
   canvas: HTMLCanvasElement;
   /** Optional layer mask: alpha channel controls visibility (opaque = visible). */
   mask: HTMLCanvasElement | null;
+  /** If set, this is a non-destructive adjustment layer affecting layers below it. */
+  adjustment: AdjustmentLayerData | null;
 }
+
+export type AdjustmentType =
+  | 'curves'
+  | 'levels'
+  | 'brightness-contrast'
+  | 'hue-saturation'
+  | 'color-balance'
+  | 'exposure'
+  | 'vibrance';
+
+/** A control point for a tone curve, in 0-255 input/output space. */
+export interface CurvePoint {
+  x: number;
+  y: number;
+}
+
+export interface CurvesSettings {
+  rgb: CurvePoint[];
+  r: CurvePoint[];
+  g: CurvePoint[];
+  b: CurvePoint[];
+}
+
+export interface LevelsSettings {
+  inputBlack: number;
+  inputWhite: number;
+  gamma: number;
+  outputBlack: number;
+  outputWhite: number;
+}
+
+export interface BrightnessContrastSettings {
+  brightness: number;
+  contrast: number;
+}
+
+export interface HueSaturationSettings {
+  hue: number;
+  saturation: number;
+  lightness: number;
+}
+
+export interface ColorBalanceSettings {
+  cyanRed: number;
+  magentaGreen: number;
+  yellowBlue: number;
+  preserveLuminosity: boolean;
+}
+
+export interface ExposureSettings {
+  exposure: number;
+  offset: number;
+  gamma: number;
+}
+
+export interface VibranceSettings {
+  vibrance: number;
+  saturation: number;
+}
+
+export interface AdjustmentSettingsMap {
+  curves: CurvesSettings;
+  levels: LevelsSettings;
+  'brightness-contrast': BrightnessContrastSettings;
+  'hue-saturation': HueSaturationSettings;
+  'color-balance': ColorBalanceSettings;
+  exposure: ExposureSettings;
+  vibrance: VibranceSettings;
+}
+
+export interface AdjustmentLayerData {
+  type: AdjustmentType;
+  settings: AdjustmentSettingsMap[AdjustmentType];
+  /** When true, only affects the layer directly below it (clipping mask), not the whole stack below. */
+  clipToBelow: boolean;
+}
+
 
 /** Which canvas drawing tools currently target for the active layer. */
 export type EditTarget = 'pixels' | 'mask';
